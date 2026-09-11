@@ -1,18 +1,102 @@
 import SwiftUI
 
+enum SettingsTab: Hashable {
+    case welcome, buttons, pointer, touchpad, clutch, general
+}
+
 struct SettingsView: View {
     @EnvironmentObject var model: AppModel
 
     var body: some View {
-        TabView {
-            ButtonsTab().tabItem { Label("Buttons", systemImage: "button.programmable") }
-            PointerTab().tabItem { Label("Pointer", systemImage: "cursorarrow.motionlines") }
-            TouchpadTab().tabItem { Label("Touchpad", systemImage: "hand.point.up.left") }
-            ClutchTab().tabItem { Label("Clutch", systemImage: "hand.raised") }
-            GeneralTab().tabItem { Label("General", systemImage: "gearshape") }
+        TabView(selection: $model.settingsTab) {
+            WelcomeTab().tabItem { Label("Welcome", systemImage: "hand.wave") }.tag(SettingsTab.welcome)
+            ButtonsTab().tabItem { Label("Buttons", systemImage: "button.programmable") }.tag(SettingsTab.buttons)
+            PointerTab().tabItem { Label("Pointer", systemImage: "cursorarrow.motionlines") }.tag(SettingsTab.pointer)
+            TouchpadTab().tabItem { Label("Touchpad", systemImage: "hand.point.up.left") }.tag(SettingsTab.touchpad)
+            ClutchTab().tabItem { Label("Clutch", systemImage: "hand.raised") }.tag(SettingsTab.clutch)
+            GeneralTab().tabItem { Label("General", systemImage: "gearshape") }.tag(SettingsTab.general)
         }
-        .frame(width: 520)
+        .frame(width: 540)
+        .frame(minHeight: 560)
         .padding(.vertical, 6)
+    }
+}
+
+/// First-run guide and live setup checklist. Also shown when the app is launched while already running.
+struct WelcomeTab: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        Form {
+            Section {
+                HStack(spacing: 14) {
+                    Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 64, height: 64)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("GearVR Remote lives in your menu bar").font(.title3.weight(.semibold))
+                        HStack(spacing: 6) {
+                            Text("Look for")
+                            Image(nsImage: ControllerGlyph.image(model.glyphStyle)).renderingMode(.template)
+                            Text("at the top right of the screen. Click it for quick controls.")
+                        }
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+            Section("Setup") {
+                CheckRow(done: model.linkState != .unauthorized, title: "Bluetooth access",
+                         detail: model.linkState == .unauthorized ? "Allow GearVR Remote under Privacy & Security → Bluetooth." : "Allowed")
+                CheckRow(done: model.accessibilityTrusted, title: "Accessibility access",
+                         detail: model.accessibilityTrusted ? "Allowed. The controller can move the pointer."
+                                                            : "Needed to move the pointer and click.") {
+                    if !model.accessibilityTrusted { Button("Open Settings…") { model.openAccessibilitySettings() } }
+                }
+                CheckRow(done: model.isStreaming, title: "Controller connected",
+                         detail: model.isStreaming ? (model.deviceName ?? "Connected") : "Press Home on the controller to wake it.")
+                Toggle("Start GearVR Remote when you log in",
+                       isOn: Binding(get: { model.launchAtLogin }, set: { model.setLaunchAtLogin($0) }))
+            }
+            Section("Controls") {
+                ForEach([("Point & turn", "move the pointer"),
+                         ("Trigger", "click · hold and move to drag"),
+                         ("Touchpad", "slide to scroll · click to right-click"),
+                         ("Home", "air mouse on/off"),
+                         ("Trigger + touch bottom of pad", "freeze the pointer while you re-grip"),
+                         ("Back · Volume ±", "Escape · system volume")], id: \.0) { control, action in
+                    LabeledContent(control) { Text(action).foregroundStyle(.secondary) }
+                }
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+private struct CheckRow<Accessory: View>: View {
+    let done: Bool
+    let title: String
+    let detail: String
+    @ViewBuilder var accessory: () -> Accessory
+
+    init(done: Bool, title: String, detail: String, @ViewBuilder accessory: @escaping () -> Accessory = { EmptyView() }) {
+        self.done = done
+        self.title = title
+        self.detail = detail
+        self.accessory = accessory
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: done ? "checkmark.circle.fill" : "circle.dashed")
+                .foregroundStyle(done ? Color.green : .orange)
+                .font(.title3)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                Text(detail).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            accessory()
+        }
     }
 }
 

@@ -5,13 +5,14 @@
 #   ./build.sh test      run the core tests against recorded controller packets
 #   ./build.sh install   build, then copy the app to /Applications and launch it
 #   ./build.sh run       build, then launch from build/
+#   ./build.sh dist      build, then package build/GearVR-Remote-<version>.dmg for distribution
 set -euo pipefail
 cd "$(dirname "$0")"
 
 NAME="GearVR Remote"
 EXE="GearVRRemote"
 BUNDLE_ID="com.dennisonbertram.gearvr-remote"
-VERSION="1.0.0"
+VERSION="${VERSION:-1.0.0}"
 MIN_OS="14.0"
 APP="build/$NAME.app"
 FLAGS=(-swift-version 5 -O)
@@ -68,10 +69,22 @@ PLIST
     echo "built $APP"
 }
 
+make_dmg() {
+    local stage="build/dmg" dmg="build/GearVR-Remote-$VERSION.dmg"
+    rm -rf "$stage" "$dmg"
+    mkdir -p "$stage"
+    cp -R "$APP" "$stage/"
+    ln -s /Applications "$stage/Applications"
+    hdiutil create -volname "$NAME" -srcfolder "$stage" -ov -format UDZO "$dmg" >/dev/null
+    rm -rf "$stage"
+    echo "packaged $dmg"
+}
+
 case "${1:-build}" in
     test) run_tests ;;
     build) build_app ;;
     run) build_app; open "$APP" ;;
+    dist) build_app; make_dmg ;;
     install)
         build_app
         pkill -x "$EXE" 2>/dev/null || true
@@ -80,5 +93,5 @@ case "${1:-build}" in
         open "/Applications/$NAME.app"
         echo "installed /Applications/$NAME.app"
         ;;
-    *) echo "usage: $0 [build|test|run|install]"; exit 1 ;;
+    *) echo "usage: $0 [build|test|run|install|dist]"; exit 1 ;;
 esac

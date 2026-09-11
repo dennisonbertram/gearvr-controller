@@ -1,0 +1,41 @@
+name: Mac app
+
+on:
+  push:
+    branches: [main]
+    paths: ["mac/**", "tests_fixtures.json", ".github/workflows/release-mac.yml"]
+    tags: ["v*"]
+  pull_request:
+    paths: ["mac/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test
+        run: mac/build.sh test
+
+      - name: Build DMG
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then export VERSION="${GITHUB_REF_NAME#v}"; fi
+          mac/build.sh dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GearVR-Remote
+          path: mac/build/*.dmg
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" --title "GearVR Remote $GITHUB_REF_NAME" --notes-file mac/RELEASE_NOTES.md
+          gh release upload "$GITHUB_REF_NAME" mac/build/*.dmg --clobber

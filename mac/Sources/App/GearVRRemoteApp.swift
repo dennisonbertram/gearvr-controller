@@ -26,10 +26,12 @@ struct GearVRRemoteApp: App {
 
 private struct MenuBarLabel: View {
     @EnvironmentObject var model: AppModel
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         Image(nsImage: ControllerGlyph.image(model.glyphStyle))
             .accessibilityLabel("GearVR Remote: \(model.statusText)")
+            .onAppear { model.openSettingsAction = { openSettings() } }
     }
 }
 
@@ -39,6 +41,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         model.start()
         if let dir = Snapshot.directory { Snapshot.run(model: model, into: dir) }
+    }
+
+    /// Launching the app again (Finder, Spotlight, Launchpad) while it runs opens its window,
+    /// so it never looks like nothing happened.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        model.presentSettings(.welcome)
+        return true
     }
 
     func applicationWillTerminate(_ notification: Notification) {

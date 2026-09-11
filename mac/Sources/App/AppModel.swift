@@ -33,6 +33,14 @@ final class AppModel: ObservableObject {
         }
     }
     @Published var launchAtLogin = SMAppService.mainApp.status == .enabled
+    @Published var settingsTab = SettingsTab.welcome
+
+    /// Opens the Settings window; installed by a view that has the SwiftUI openSettings action.
+    var openSettingsAction: (() -> Void)? {
+        didSet { if pendingSettings, openSettingsAction != nil { pendingSettings = false; presentSettings(settingsTab) } }
+    }
+    private var pendingSettings = false
+    private static let welcomedKey = "didShowWelcome"
 
     /// Set by the menu while it's open; live state is only published then.
     var liveVisible = false {
@@ -88,6 +96,10 @@ final class AppModel: ObservableObject {
         if !accessibilityTrusted && !dryRun {
             AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
         }
+        if !UserDefaults.standard.bool(forKey: Self.welcomedKey) && Snapshot.directory == nil {
+            UserDefaults.standard.set(true, forKey: Self.welcomedKey)
+            presentSettings(.welcome)
+        }
         timers.append(Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.tick() })
         timers.append(Timer.scheduledTimer(withTimeInterval: 1.0 / 15, repeats: true) { [weak self] _ in
             if self?.liveVisible == true { self?.publishLive() }
@@ -132,6 +144,14 @@ final class AppModel: ObservableObject {
     }
 
     func resetConfig() { config = RemoteConfig() }
+
+    func presentSettings(_ tab: SettingsTab? = nil) {
+        if let tab { settingsTab = tab }
+        guard let open = openSettingsAction else { pendingSettings = true; return }
+        NSApp.activate(ignoringOtherApps: true)
+        open()
+        log("settings opened (\(settingsTab))")
+    }
 
     func setLaunchAtLogin(_ on: Bool) {
         do {

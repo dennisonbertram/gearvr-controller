@@ -2,7 +2,6 @@ import SwiftUI
 
 struct MenuView: View {
     @EnvironmentObject var model: AppModel
-    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -39,10 +38,7 @@ struct MenuView: View {
 
             Divider()
             HStack {
-                Button("Settings…") {
-                    NSApp.activate(ignoringOtherApps: true)
-                    openSettings()
-                }
+                Button("Settings…") { model.presentSettings() }
                 Spacer()
                 Button("Quit") { NSApp.terminate(nil) }
             }

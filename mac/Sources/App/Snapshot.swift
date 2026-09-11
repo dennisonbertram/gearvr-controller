@@ -21,6 +21,7 @@ enum Snapshot {
                         Image(nsImage: ControllerGlyph.image($0, size: 36)).renderingMode(.template).foregroundStyle(.primary)
                     }
                 }.padding(10), model: model, to: "\(dir)/glyphs.png")
+                render(WelcomeTab().frame(width: 540), model: model, to: "\(dir)/settings-welcome.png")
                 render(Form { ButtonsTab() }.formStyle(.grouped).frame(width: 520), model: model, to: "\(dir)/settings-buttons.png")
                 render(PointerTab().frame(width: 520), model: model, to: "\(dir)/settings-pointer.png")
                 render(TouchpadTab().frame(width: 520), model: model, to: "\(dir)/settings-touchpad.png")

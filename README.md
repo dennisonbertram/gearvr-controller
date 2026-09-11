@@ -10,7 +10,9 @@ back to work:
   touchpad and button bits, and a hidden HID consumer-control channel.
 * **[GearVR Remote.app](mac/)**: a native Swift menu-bar app that turns the
   controller into a gyro air-mouse, trackpad, and media/keyboard remote on macOS,
-  with a settings UI for remapping everything. Build it with `cd mac && ./build.sh install`.
+  with a settings UI for remapping everything.
+  **[Download the latest release](https://github.com/dennisonbertram/gearvr-controller/releases/latest)**,
+  or build it yourself with `cd mac && ./build.sh install`.
 * **`remote.py`**: the same remote as a Python script, configured with `config.toml`.
 * **`viewer/`**: a three.js web viewer with a to-scale 3D model of the controller
   that mirrors the real one live, plus a byte-by-byte packet decoder.
