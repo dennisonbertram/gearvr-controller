@@ -71,6 +71,16 @@ and holds, a small push hops to the next one (handy for the window traffic
 lights or menus), and a push into empty space pulls free. It only acts on
 controller-driven movement, so your trackpad and mouse behave normally.
 
+**Smoothing** (Settings → Pointer, 30% by default) evens out small wobbles. It
+adapts to speed: slow, careful movements are steadied, and fast moves come through
+without lag. Set it to 0% to turn it off.
+
+**Training** (the *Training…* button in the menu) is a one-minute aiming exercise.
+You click 15 targets that shrink to the size of a window's close button. It
+measures your hand tremor from the gyro, how directly you reach each target, and
+how often you hit small targets on the first click. It then suggests pointer
+speed, smoothing, and magnet strength, and you can apply them with one click.
+
 The menu has quick switches for pausing control, the air-mouse, and the clutch,
 plus pointer speed, touchpad mode, and a live view of the buttons and touchpad.
 **Settings…** lets you remap every button and swipe (clicks, key combos like

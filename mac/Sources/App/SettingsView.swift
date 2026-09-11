@@ -129,6 +129,8 @@ struct PointerTab: View {
             Section("Gyro air mouse") {
                 Toggle("Air mouse on at launch", isOn: $model.config.pointerEnabledAtLaunch)
                 SliderRow(title: "Speed", value: $model.config.sensitivity, range: 6...60, format: "%.0f px/°")
+                SliderRow(title: "Smoothing", value: $model.config.smoothing, range: 0...1, format: "%.0f%%", scale: 100)
+                    .help("Evens out small wobbles. It adapts to speed: steadier when you move slowly, quick when you move fast. 0% turns it off.")
                 SliderRow(title: "Dead zone", value: $model.config.deadzoneDPS, range: 0...5, format: "%.1f °/s")
                 SliderRow(title: "Click steadying", value: $model.config.clickFreezeMS, range: 0...400, format: "%.0f ms")
             }
@@ -142,7 +144,10 @@ struct PointerTab: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {
-                Text("Point and turn the controller to move the cursor. Turning is measured around the real vertical, so it works however you roll your wrist. When it connects, set the controller down for a second so it can calibrate the gyro.")
+                LabeledContent("Not sure what suits you?") {
+                    Button("Start training…") { model.showTraining() }
+                }
+                Text("Point and turn the controller to move the cursor. Turning is measured around the real vertical, so it works however you roll your wrist. When it connects, set the controller down for a second so it can calibrate the gyro. Smoothing adapts to speed: it steadies slow, careful movement and stays out of the way when you move fast.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

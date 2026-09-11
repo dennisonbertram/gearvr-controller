@@ -120,6 +120,7 @@ final class Rig {
         cfg.deadzoneDPS = 0
         cfg.sensitivity = 20
         cfg.clutchSound = false
+        cfg.smoothing = 0 // these tests check event logic; smoothing has its own test
         tweak(&cfg)
         mapper = InputMapper(config: cfg, sink: sink, now: { 0 })
         mapper.bias.calibrated = true
@@ -237,6 +238,7 @@ test("yaw left moves the cursor left, pitch up moves it up") {
     let sink = MoveSink()
     var cfg = RemoteConfig()
     cfg.clickFreezeMS = 0
+    cfg.smoothing = 0
     let m = InputMapper(config: cfg, sink: sink, now: { 0 })
     m.bias.calibrated = true
     var t: UInt32 = 0
@@ -252,6 +254,64 @@ test("yaw left moves the cursor left, pitch up moves it up") {
     sink.dx = 0
     for _ in 0..<20 { feed(SIMD3(30, 0, 0)) } // +X = nose up
     check(sink.dy < -50 && abs(sink.dx) < 1, "up: \(sink.dx), \(sink.dy)")
+}
+
+test("smoothing: calms jitter at rest, keeps up with fast moves") {
+    var s = AdaptiveSmoother(amount: 0.3)
+    var jitterIn = 0.0, jitterOut = 0.0
+    for i in 0..<400 { // +/-3 deg/s tremor at ~10 Hz around zero, sampled at 206 Hz
+        let x = 3 * sin(Double(i) * 2 * .pi * 10 / 206)
+        let y = s.filter(x, dt: 1 / 206)
+        if i > 100 { jitterIn += x * x; jitterOut += y * y }
+    }
+    check(jitterOut < jitterIn * 0.5, "tremor reduced: \(jitterOut / jitterIn)")
+    var f = AdaptiveSmoother(amount: 0.3)
+    var y = 0.0
+    for _ in 0..<10 { y = f.filter(200, dt: 1 / 206) } // sudden 200 deg/s flick, ~50 ms
+    check(y > 190, "fast move barely delayed: \(y)")
+}
+
+test("smoothing: applied by the mapper, and fully bypassed at 0") {
+    final class Sum: InputSink {
+        var dx = 0.0, moves = 0
+        func move(dx: Double, dy: Double) { self.dx += dx; moves += 1 }
+        func mouseButton(_ b: MouseButton, down: Bool) {}
+        func scroll(dy: Int) {}
+        func key(_ combo: String, down: Bool) {}
+        func media(_ name: String, down: Bool) {}
+        func shell(_ command: String) {}
+        func sound(_ name: String) {}
+        func releaseAll() {}
+    }
+    func run(_ smoothing: Double) -> (first: Double, total: Double) {
+        let sink = Sum()
+        var cfg = RemoteConfig()
+        cfg.clickFreezeMS = 0
+        cfg.deadzoneDPS = 0
+        cfg.smoothing = smoothing
+        let m = InputMapper(config: cfg, sink: sink, now: { 0 })
+        m.bias.calibrated = true
+        var t: UInt32 = 0
+        var first = 0.0
+        for i in 0..<60 {
+            let gyro = SIMD3<Double>(0, 0, i >= 5 && i < 25 ? 20 : 0) // rest, turn, rest
+            let samples = (0..<3).map { _ -> IMUSample in t &+= 4850; return IMUSample(timestampUS: t, accel: SIMD3(0, 0, 1), gyro: gyro) }
+            m.handle(Packet(samples: samples, touch: .none, buttons: []))
+            if i == 6 { first = sink.dx }
+        }
+        return (first, sink.dx)
+    }
+    let raw = run(0), smooth = run(0.5)
+    check(abs(smooth.first) < abs(raw.first), "smoothed start is gentler: \(smooth.first) vs \(raw.first)")
+    check(abs(smooth.total - raw.total) / abs(raw.total) < 0.1, "same distance overall: \(smooth.total) vs \(raw.total)")
+}
+
+test("config: v1 settings on the old default speed move to the new default") {
+    let old = try JSONDecoder().decode(RemoteConfig.self, from: Data(#"{"sensitivity": 22}"#.utf8))
+    check(old.version == 1 && old.migrated().sensitivity == 18, "22 -> 18")
+    let custom = try JSONDecoder().decode(RemoteConfig.self, from: Data(#"{"sensitivity": 30}"#.utf8))
+    check(custom.migrated().sensitivity == 30, "custom speed kept")
+    check(RemoteConfig().version == RemoteConfig.currentVersion && RemoteConfig().sensitivity == 18, "new default")
 }
 
 test("gyro bias calibrates when still") {

@@ -46,6 +46,8 @@ struct MenuView: View {
             Divider()
             HStack {
                 Button("Settings…") { model.presentSettings() }
+                Button("Training…") { model.showTraining() }
+                    .help("A one-minute aiming exercise that suggests pointer speed, smoothing and magnet strength for you.")
                 Spacer()
                 Button("Quit") { NSApp.terminate(nil) }
             }

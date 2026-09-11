@@ -64,7 +64,8 @@ public struct RemoteConfig: Codable, Equatable {
 
     // gyro air-mouse
     public var pointerEnabledAtLaunch = true
-    public var sensitivity = 22.0 // pixels per degree
+    public var sensitivity = 18.0 // pixels per degree
+    public var smoothing = 0.3 // 0 off ... 1 strong (adaptive: steadier when slow, quick when fast)
     public var deadzoneDPS = 1.2
     public var clickFreezeMS = 150.0
 
@@ -88,6 +89,10 @@ public struct RemoteConfig: Codable, Equatable {
     public var magnetStrength = 0.25 // 0 subtle ... 1 strong; above 0.55 it snaps
 
     public var magnet: MagnetSettings { MagnetSettings(strength: magnetStrength) }
+
+    /// Bumped when defaults change in a way saved settings should follow (see `migrated`).
+    public static let currentVersion = 2
+    public var version = RemoteConfig.currentVersion
 
     public var gestures: [String: String] = [
         "swipe_left": "key:left",
@@ -116,5 +121,15 @@ public struct RemoteConfig: Codable, Equatable {
         take(.clutchZoneSize, &clutchZoneSize); take(.dragThresholdPX, &dragThresholdPX)
         take(.clutchSound, &clutchSound); take(.gestures, &gestures)
         take(.magnetEnabled, &magnetEnabled); take(.magnetStrength, &magnetStrength)
+        take(.smoothing, &smoothing)
+        version = (try? c.decode(Int.self, forKey: .version)) ?? 1
+    }
+
+    /// Settings saved by older versions, updated where their value was just the old default.
+    public func migrated() -> RemoteConfig {
+        var c = self
+        if c.version < 2 && c.sensitivity == 22 { c.sensitivity = 18 } // v2: default pointer speed 22 -> 18
+        c.version = Self.currentVersion
+        return c
     }
 }

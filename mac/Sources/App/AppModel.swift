@@ -2,6 +2,7 @@ import AppKit
 import ApplicationServices
 import ServiceManagement
 import SwiftUI
+import simd
 
 struct LiveState: Equatable {
     var buttons: Set<ControllerButton> = []
@@ -57,6 +58,7 @@ final class AppModel: ObservableObject {
     private let link = ControllerLink()
     private let sink = EventSink()
     private let scanner = TargetScanner()
+    let training = TrainingWindow()
     private var magnetTimer: Timer?
     private let mapper: InputMapper
     private var latest: Packet?
@@ -68,7 +70,7 @@ final class AppModel: ObservableObject {
     init() {
         let saved = UserDefaults.standard.data(forKey: Self.configKey)
             .flatMap { try? JSONDecoder().decode(RemoteConfig.self, from: $0) }
-        let cfg = saved ?? RemoteConfig()
+        let cfg = saved?.migrated() ?? RemoteConfig()
         config = cfg
         pointerOn = cfg.pointerEnabledAtLaunch
         mapper = InputMapper(config: cfg, sink: sink)
@@ -101,6 +103,7 @@ final class AppModel: ObservableObject {
         link.onPacket = { [weak self] in self?.handle($0) }
         link.start()
 
+        save() // persist any migration of older settings
         sink.magnet.settings = config.magnet
         scanner.onTargets = { [weak self] targets in self?.sink.magnet.targets = targets }
         updateMagnet()
@@ -148,6 +151,12 @@ final class AppModel: ObservableObject {
         packets += 1
         if battery != p.battery { battery = p.battery }
         if enabled { mapper.handle(p) }
+        if training.isRecording && mapper.bias.calibrated {
+            // raw hand motion for the training's tremor measurement
+            let b = mapper.bias.bias
+            let mean = p.samples.map { simd_length($0.gyro - b) }.reduce(0, +) / Double(p.samples.count)
+            training.session.recordTremor(mean)
+        }
     }
 
     private func tick() {
@@ -180,6 +189,8 @@ final class AppModel: ObservableObject {
     }
 
     func resetConfig() { config = RemoteConfig() }
+
+    func showTraining() { training.show(model: self) }
 
     func presentSettings(_ tab: SettingsTab? = nil) {
         if let tab { settingsTab = tab }

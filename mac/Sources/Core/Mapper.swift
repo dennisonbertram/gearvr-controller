@@ -14,6 +14,37 @@ public protocol InputSink: AnyObject {
     func releaseAll()
 }
 
+/// Adaptive low-pass for pointer rates (a "1€ filter" variant): the cutoff rises with speed,
+/// so slow movement and holding still are smoothed while fast moves stay responsive.
+public struct AdaptiveSmoother {
+    public var minCutoff: Double // Hz at rest
+    public var speedGain: Double // extra Hz per deg/s of motion
+    private var value: Double?
+
+    public init(minCutoff: Double, speedGain: Double) {
+        self.minCutoff = minCutoff
+        self.speedGain = speedGain
+    }
+
+    /// `amount` 0 (off) ... 1 (strong).
+    public init(amount: Double) {
+        let a = min(max(amount, 0), 1)
+        self.init(minCutoff: 12 * pow(0.1, a), speedGain: 0.12)
+    }
+
+    public mutating func filter(_ x: Double, dt: Double) -> Double {
+        guard let prev = value, dt > 0 else { value = x; return x }
+        let cutoff = minCutoff + speedGain * abs(x)
+        let tau = 1 / (2 * Double.pi * cutoff)
+        let alpha = 1 / (1 + tau / dt)
+        let y = prev + alpha * (x - prev)
+        value = y
+        return y
+    }
+
+    public mutating func reset() { value = nil }
+}
+
 /// Tracks the gyro zero-offset, re-estimating it whenever the controller is still.
 public final class GyroBias {
     public private(set) var bias = SIMD3<Double>.zero
@@ -65,6 +96,9 @@ public final class InputMapper {
     private var touchPrev: (x: Int, y: Int)?
     private var touchStart: (t: TimeInterval, x: Int, y: Int)?
     private var scrollFrac = 0.0
+    private var smoothYaw = AdaptiveSmoother(amount: 0)
+    private var smoothPitch = AdaptiveSmoother(amount: 0)
+    private var smoothingAmount = -1.0
     private var pending: SIMD2<Double>? // deferred clutch-button press: buffered pointer motion
     private var suppressed: Set<ControllerButton> = [] // pressed during the clutch: ignored until released
 
@@ -95,6 +129,8 @@ public final class InputMapper {
         lastTimestamp = nil
         touchPrev = nil
         touchStart = nil
+        smoothYaw.reset()
+        smoothPitch.reset()
     }
 
     // MARK: actions
@@ -220,6 +256,15 @@ public final class InputMapper {
             right = rn > 0.2 ? right / rn : SIMD3(1, 0, 0)
             var yaw = simd_dot(w, u) // + = turning left
             var pitch = simd_dot(w, right) // + = nose up
+            if config.smoothing > 0 {
+                if smoothingAmount != config.smoothing {
+                    smoothingAmount = config.smoothing
+                    smoothYaw = AdaptiveSmoother(amount: config.smoothing)
+                    smoothPitch = AdaptiveSmoother(amount: config.smoothing)
+                }
+                yaw = smoothYaw.filter(yaw, dt: dt)
+                pitch = smoothPitch.filter(pitch, dt: dt)
+            }
             let dz = config.deadzoneDPS
             yaw = copysign(max(abs(yaw) - dz, 0), yaw)
             pitch = copysign(max(abs(pitch) - dz, 0), pitch)

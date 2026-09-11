@@ -27,6 +27,24 @@ enum Snapshot {
                 render(TouchpadTab().frame(width: 520), model: model, to: "\(dir)/settings-touchpad.png")
                 render(ClutchTab().frame(width: 520), model: model, to: "\(dir)/settings-clutch.png")
                 render(GeneralTab().frame(width: 520), model: model, to: "\(dir)/settings-general.png")
+                let session = TrainingSession()
+                session.canvas = CGSize(width: 1000, height: 640)
+                let view = { TrainingView(session: session, model: model, close: {}).frame(width: 1000, height: 640) }
+                render(view(), model: model, to: "\(dir)/training-intro.png")
+                session.begin()
+                session.hover(CGPoint(x: 500, y: 320))
+                session.miss(at: CGPoint(x: 520, y: 300))
+                render(view(), model: model, to: "\(dir)/training-running.png")
+                for i in 0..<TrainingSession.sizes.count {
+                    guard let t = session.target else { break }
+                    session.hover(CGPoint(x: t.center.x - 200, y: t.center.y))
+                    session.hover(CGPoint(x: t.center.x + 30, y: t.center.y + 10)) // overshoot
+                    session.hover(t.center)
+                    session.recordTremor(2.4)
+                    if i % 4 == 3 { session.miss(at: .zero) }
+                    session.hit()
+                }
+                render(view(), model: model, to: "\(dir)/training-results.png")
                 NSApp.terminate(nil)
             }
         }
