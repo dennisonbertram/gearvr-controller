@@ -8,8 +8,10 @@ back to work:
   covers the command acknowledgement handshake that unlocks the 68 packets/s
   stream, the three IMU samples in each packet, calibrated axes and scales, the
   touchpad and button bits, and a hidden HID consumer-control channel.
-* **`remote.py`**: use the controller as a gyro air-mouse, trackpad, and
-  media/keyboard remote on macOS.
+* **[GearVR Remote.app](mac/)**: a native Swift menu-bar app that turns the
+  controller into a gyro air-mouse, trackpad, and media/keyboard remote on macOS,
+  with a settings UI for remapping everything. Build it with `cd mac && ./build.sh install`.
+* **`remote.py`**: the same remote as a Python script, configured with `config.toml`.
 * **`viewer/`**: a three.js web viewer with a to-scale 3D model of the controller
   that mirrors the real one live, plus a byte-by-byte packet decoder.
 
