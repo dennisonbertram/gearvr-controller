@@ -1,0 +1,44 @@
+# Gear VR Controller -> macOS input mapping. Edit and restart remote.py.
+#
+# Button actions:
+#   left_click | right_click | middle_click      (held = drag)
+#   key:<combo>       e.g. "key:escape", "key:cmd+[", "key:space", "key:ctrl+left"
+#   media:<name>      volume_up volume_down mute play next previous
+#                     brightness_up brightness_down
+#   shell:<command>   run a shell command on press
+#   toggle_pointer    turn the gyro air-mouse on/off
+#   none
+#
+# NOTE: holding HOME for several seconds puts the controller into pairing mode
+# and wipes its bond with this Mac, so don't rely on long-pressing home.
+
+[buttons]
+trigger = "left_click"
+touchpad = "right_click"
+back = "key:escape"
+home = "toggle_pointer"
+volume_up = "media:volume_up"
+volume_down = "media:volume_down"
+
+[pointer]
+enabled = true         # gyro air-mouse active at startup
+sensitivity = 22.0     # pixels per degree of rotation
+deadzone_dps = 1.2     # ignore rotation slower than this (hand tremor)
+click_freeze_ms = 150  # hold the cursor still right after a button press
+
+[touchpad]
+# cursor   - drag your thumb to move the pointer, like a laptop trackpad
+# scroll   - drag to scroll
+# gestures - quick swipes trigger the actions in [gestures]
+mode_pointer_on = "scroll"
+mode_pointer_off = "cursor"
+cursor_speed = 3.0
+scroll_speed = 0.6
+invert_scroll = false
+
+[gestures]
+swipe_left = "key:left"
+swipe_right = "key:right"
+swipe_up = "key:up"
+swipe_down = "key:down"
+tap = "none"
