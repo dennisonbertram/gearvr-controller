@@ -26,6 +26,18 @@ sensitivity = 22.0     # pixels per degree of rotation
 deadzone_dps = 1.2     # ignore rotation slower than this (hand tremor)
 click_freeze_ms = 150  # hold the cursor still right after a button press
 
+[clutch]
+# Re-home the cursor: hold the trigger, touch the bottom of the touchpad, then let
+# go of the pad and move your hand to a comfortable spot - the cursor stays put.
+# Release the trigger to resume. With this on, a trigger tap clicks on release and
+# a drag starts once the pointer moves past drag_threshold_px.
+enabled = true
+button = "trigger"
+zone = "bottom"          # bottom | top | left | right | any
+zone_size = 0.35         # fraction of the pad counted as the zone
+drag_threshold_px = 12
+sound = true             # tink on engage, pop on release
+
 [touchpad]
 # cursor   - drag your thumb to move the pointer, like a laptop trackpad
 # scroll   - drag to scroll

@@ -14,7 +14,7 @@ import time
 import tomllib
 from collections import deque
 
-from gearvr import BUTTON_BITS, Controller, Packet
+from gearvr import BUTTON_BITS, TOUCH_MAX, Controller, Packet, Touch
 from macos_input import MEDIA_KEYS, Output, accessibility_ok, parse_combo
 
 SWIPE_MAX_S = 0.45
@@ -77,6 +77,13 @@ class Mapper:
         self.touch_prev: tuple[int, int] | None = None
         self.touch_start: tuple[float, int, int] | None = None
         self.scroll_frac = 0.0
+        # clutch: hold the clutch button, touch the pad zone, reposition, release
+        cc = {"enabled": False, "button": "trigger", "zone": "bottom", "zone_size": 0.35,
+              "drag_threshold_px": 12, "sound": True, **cfg.get("clutch", {})}
+        self.clutch = cc
+        self.pending: list[float] | None = None  # deferred press: buffered pointer motion
+        self.clutched = False
+        self.suppressed: set[str] = set()  # buttons pressed while clutched: ignored until released
 
     # --- actions -------------------------------------------------------------
     def run_action(self, action: str, down: bool) -> None:
@@ -99,18 +106,81 @@ class Mapper:
 
     # --- packet handling -----------------------------------------------------
     def on_packet(self, p: Packet) -> None:
+        self.check_clutch(p.touch)
         self.handle_buttons(p)
         self.handle_motion(p)
         self.handle_touch(p)
+
+    # --- clutch / deferred press ---------------------------------------------
+    def in_clutch_zone(self, t: Touch) -> bool:
+        edge = TOUCH_MAX * self.clutch["zone_size"]
+        return {
+            "bottom": t.y >= TOUCH_MAX - edge, "top": t.y <= edge,
+            "left": t.x <= edge, "right": t.x >= TOUCH_MAX - edge, "any": True,
+        }[self.clutch["zone"]]
+
+    def check_clutch(self, t: Touch) -> None:
+        """Engage when a fresh touch lands in the zone while the clutch button is held."""
+        if self.pending is None or not t.touching or self.touch_prev is not None:
+            return
+        if self.in_clutch_zone(t):
+            self.pending = None  # the click never happens
+            self.clutched = True
+            self.feedback("Tink")
+            print("clutch: cursor frozen - reposition your hand, release the "
+                  f"{self.clutch['button']} to resume", flush=True)
+
+    def feedback(self, sound: str) -> None:
+        if self.clutch["sound"]:
+            subprocess.Popen(["afplay", f"/System/Library/Sounds/{sound}.aiff"])
+
+    def clutch_button(self, down: bool) -> None:
+        action = self.buttons.get(self.clutch["button"], "none")
+        if down:
+            if self.clutch["enabled"] and self.pointer_on:
+                self.pending = [0.0, 0.0]  # decide on release / movement / clutch
+            else:
+                self.run_action(action, True)
+        elif self.clutched:
+            self.clutched = False
+            self.feedback("Pop")
+            print("clutch released", flush=True)
+        elif self.pending is not None:
+            self.pending = None
+            self.tap_action(action)  # released without moving: a plain click
+        else:
+            self.run_action(action, False)  # end of a drag / immediate press
+
+    def pointer_move(self, dx: float, dy: float) -> None:
+        if self.clutched or (dx == 0 and dy == 0):
+            return
+        if self.pending is not None:
+            self.pending[0] += dx
+            self.pending[1] += dy
+            if math.hypot(*self.pending) < self.clutch["drag_threshold_px"]:
+                return  # cursor stays put: steadier clicks
+            bx, by = self.pending
+            self.pending = None
+            self.run_action(self.buttons.get(self.clutch["button"], "none"), True)  # start drag here
+            dx, dy = bx, by
+        self.out.move(dx, dy)
 
     def handle_buttons(self, p: Packet) -> None:
         if p.buttons == self.prev_buttons:
             return
         for name in BUTTON_BITS:
             was, now = name in self.prev_buttons, name in p.buttons
-            if was != now:
-                if now:
-                    self.freeze_until = time.monotonic() + self.cfg["pointer"]["click_freeze_ms"] / 1000
+            if was == now:
+                continue
+            if now:
+                self.freeze_until = time.monotonic() + self.cfg["pointer"]["click_freeze_ms"] / 1000
+            if name == self.clutch["button"]:
+                self.clutch_button(now)
+            elif now and self.clutched:
+                self.suppressed.add(name)
+            elif not now and name in self.suppressed:
+                self.suppressed.discard(name)
+            else:
                 self.run_action(self.buttons.get(name, "none"), now)
         self.prev_buttons = p.buttons
 
@@ -146,20 +216,23 @@ class Mapper:
             yaw = math.copysign(max(abs(yaw) - dz, 0.0), yaw)
             pitch = math.copysign(max(abs(pitch) - dz, 0.0), pitch)
             gain = pc["sensitivity"] * dt
-            self.out.move(-yaw * gain, -pitch * gain)
+            self.pointer_move(-yaw * gain, -pitch * gain)
 
     def handle_touch(self, p: Packet) -> None:
         tc = self.cfg["touchpad"]
         mode = tc["mode_pointer_on"] if self.pointer_on else tc["mode_pointer_off"]
         t = p.touch
         now = time.monotonic()
+        if self.clutched:
+            self.touch_prev = self.touch_start = None  # the clutch touch never scrolls
+            return
         if t.touching:
             if self.touch_start is None:
                 self.touch_start = (now, t.x, t.y)
             if self.touch_prev is not None:
                 dx, dy = t.x - self.touch_prev[0], t.y - self.touch_prev[1]
                 if mode == "cursor":
-                    self.out.move(dx * tc["cursor_speed"], dy * tc["cursor_speed"])
+                    self.pointer_move(dx * tc["cursor_speed"], dy * tc["cursor_speed"])
                 elif mode == "scroll":
                     sign = -1 if tc["invert_scroll"] else 1
                     self.scroll_frac += sign * dy * tc["scroll_speed"] * 4
@@ -186,6 +259,9 @@ class Mapper:
 
     def reset(self) -> None:
         self.out.release_all()
+        self.pending = None
+        self.clutched = False
+        self.suppressed.clear()
         self.prev_buttons = frozenset()
         self.last_ts = None
         self.touch_prev = self.touch_start = None

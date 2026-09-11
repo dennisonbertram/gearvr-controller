@@ -57,6 +57,12 @@ Default mapping:
 * **Trigger** = left click (hold to drag), **touchpad click** = right click
 * **Touchpad slide** = scroll while the air-mouse is on, trackpad-style cursor while it's off
 * **Home** = air-mouse on/off, **Back** = Escape, **Volume ±** = system volume
+* **Re-home the cursor (clutch):** hold the trigger, touch the bottom of the
+  touchpad (*tink*), let go of the pad, and move your hand to a comfortable
+  position while the cursor stays put. Release the trigger (*pop*) to resume.
+  Nothing gets clicked. This works because a trigger tap now clicks on release,
+  and a drag only starts once you've moved past a few pixels, which also makes
+  clicks steadier.
 
 Buttons can map to clicks, key combos (`key:cmd+[`), media keys, or shell
 commands. The touchpad can also run in a swipe-gesture mode. When the air-mouse
