@@ -4,9 +4,10 @@ Verified on real hardware, an **ET-YO324** (SM-R324) with firmware `YO324XXU0AQC
 talking to macOS through CoreBluetooth (bleak). The recordings are in `caps/`, and
 `test_gearvr.py` checks the decoder against real packets.
 
-Items marked **(new)** differ from, or aren't covered by, the earlier public work
-(jsyang/gearvr-controller-webbluetooth, gb2111/Access-GearVR-Controller-from-PC,
-polygraphene/FreePIEVRController).
+Items marked **(new)** aren't covered by the earlier public work, as far as I could
+find (jsyang/gearvr-controller-webbluetooth, gb2111/Access-GearVR-Controller-from-PC,
+polygraphene/FreePIEVRController). Most of the packet layout was already known,
+and polygraphene's FreePIE plugin gets the most right.
 
 ## Advertising
 
@@ -48,13 +49,18 @@ The ordering matters:
 * `0800` then `0100` straight away: streams fast for ~1.5 s, then the controller echoes `01 00` and **stops**.
 * `0100` then `0800`: streaming stops immediately, then `08 00` is echoed ~1.5 s later.
 
-This is probably why some earlier projects only ever got the slow, gappy rate.
+polygraphene's plugin writes `0800` and `0100` back to back without waiting for
+the ack, and on this unit that kills the stream after ~1.5 s. gb2111's port only
+sends `0100`, which gives the slow rate. jsyang's demo sends commands from UI
+buttons.
 
 ## Data packet (60 bytes, little-endian)
 
-Each packet carries **three IMU samples** (new). Earlier code read only one sample
-and took bytes 32–37 as the magnetometer, but those bytes are sample 3's timestamp
-and accelerometer.
+Each packet carries **three IMU samples**. polygraphene's plugin already
+processes all three. jsyang's code notes this but reads only the first, and takes
+bytes 32–37 as the magnetometer. Those bytes are actually sample 3's timestamp and
+accelerometer; the magnetometer is at 48–53, as a commenter pointed out in jsyang's
+issue #1.
 
 | Bytes | Field |
 |---|---|
@@ -67,7 +73,7 @@ and accelerometer.
 | 54–56 | touchpad (see below) |
 | 57 | temperature, °C (rose 25 → 28 while held) |
 | 58 | buttons (see below) |
-| 59 | battery, percent |
+| 59 | battery, percent **(new)**: polygraphene's plugin lists it as unknown |
 
 ### IMU
 
@@ -77,7 +83,7 @@ and accelerometer.
   at 14.40 by integrating the gyro between static poses and matching the change in
   gravity direction (≈1° error). 16.4 and 32.8 are clearly wrong.
   Typical zero-rate bias is around (−1.1, −4.5, +1.8) °/s, so compensate for it.
-* **Axes (new, verified):** right-handed.
+* **Axes (new, verified against gravity in known poses):** right-handed.
   +X = right, +Y = forward (toward the far/trigger end), +Z = out of the
   touchpad face. The gyro uses the same axes with the right-hand rule, so turning
   left gives +Z and raising the nose gives +X.
@@ -97,7 +103,9 @@ y = ((b55 & 0x03) << 8) | b56             0 = far edge  .. ~315 = near edge
 
 The pad is circular (x and y each span about 7–314 around the rim). Idle is
 `20 00 00`. The one-packet `00 00 00` lift marker **(new)** gives clean tap
-detection. The "unknown" 9-bit fields in gb2111's C# port are these coordinates.
+detection. jsyang and polygraphene decode the coordinates this way too. gb2111's
+C# port swaps x and y and reads them at 8-bit resolution, and its "unknown"
+`val1`–`val3` fields fall inside the magnetometer bytes (48–53).
 
 ### Buttons (byte 58)
 
@@ -111,7 +119,7 @@ detection. The "unknown" 9-bit fields in gb2111's C# port are these coordinates.
 | 5 | `0x20` | **volume down** |
 | 6 | `0x40` | idle flag **(new)**: clear while any button is down, set ~20 ms after release |
 
-The gb2111 port has the volume bits swapped; jsyang's is right.
+The gb2111 port has the volume bits swapped; jsyang's and polygraphene's are right.
 
 ## HID consumer channel (new)
 
