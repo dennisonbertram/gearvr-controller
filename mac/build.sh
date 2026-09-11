@@ -23,6 +23,16 @@ run_tests() {
     build/core-tests ../tests_fixtures.json
 }
 
+# macOS ties Accessibility permission to the code signature. Ad-hoc signatures change
+# every build, which silently revokes the permission. If a local identity named
+# "GearVR Remote Local Signing" exists (see README), sign with it so the grant sticks.
+signing_identity() {
+    if [ -n "${SIGN_IDENTITY:-}" ]; then echo "$SIGN_IDENTITY"; return; fi
+    local id
+    id=$(security find-identity -p codesigning 2>/dev/null | awk '/"GearVR Remote Local Signing"/ {print $2; exit}')
+    echo "${id:--}"
+}
+
 make_icon() {
     swiftc -O tools/make_icon.swift -o build/make_icon
     rm -rf build/AppIcon.iconset
@@ -65,7 +75,7 @@ build_app() {
 </dict>
 </plist>
 PLIST
-    codesign --force --sign - --identifier "$BUNDLE_ID" "$APP"
+    codesign --force --sign "$(signing_identity)" --identifier "$BUNDLE_ID" "$APP"
     echo "built $APP"
 }
 

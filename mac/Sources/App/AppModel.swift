@@ -93,6 +93,7 @@ final class AppModel: ObservableObject {
         link.onPacket = { [weak self] in self?.handle($0) }
         link.start()
 
+        log("accessibility trusted: \(accessibilityTrusted)")
         if !accessibilityTrusted && !dryRun {
             AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
         }
@@ -122,7 +123,10 @@ final class AppModel: ObservableObject {
         packetRate = Double(packets)
         packets = 0
         let trusted = AXIsProcessTrusted()
-        if trusted != accessibilityTrusted { accessibilityTrusted = trusted }
+        if trusted != accessibilityTrusted {
+            accessibilityTrusted = trusted
+            log("accessibility trusted: \(trusted)")
+        }
         if verbose, linkState == .streaming, let p = latest {
             log(String(format: "%.0f pkt/s  battery %d%%  gyro %@  buttons %@", packetRate, p.battery,
                        mapper.bias.calibrated ? "calibrated" : "calibrating",

@@ -34,8 +34,15 @@ Settings window, open *GearVR Remote* again from Spotlight, Launchpad, or
 Applications while it's running. Turn on **Start when you log in** to have it
 start automatically; it then appears under System Settings → General → Login Items.
 
-After a rebuild you may need to toggle Accessibility off and on again, because
-ad-hoc signed apps get a new code signature each build.
+macOS ties these permissions to the app's code signature. An ad-hoc signed app
+gets a new signature every build, so after rebuilding, the Accessibility switch
+can look *on* while the permission is silently gone: the buttons still light up
+in the menu, but the pointer doesn't move. To avoid that when building yourself,
+run `tools/make_signing_identity.sh` once. It creates a local self-signed
+identity that `build.sh` then uses automatically. On the first build afterwards,
+click **Always Allow** in the keychain prompt. If you're already stuck, run
+`tccutil reset Accessibility com.dennisonbertram.gearvr-remote`, relaunch, and
+allow Accessibility again.
 
 ## Using it
 
