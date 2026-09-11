@@ -63,6 +63,7 @@ struct WelcomeTab: View {
                          ("Touchpad", "slide to scroll · click to right-click"),
                          ("Home", "air mouse on/off"),
                          ("Trigger + touch bottom of pad", "freeze the pointer while you re-grip"),
+                         ("Slow down near a button", "the pointer snaps onto it (magnetic buttons)"),
                          ("Back · Volume ±", "Escape · system volume")], id: \.0) { control, action in
                     LabeledContent(control) { Text(action).foregroundStyle(.secondary) }
                 }
@@ -130,6 +131,18 @@ struct PointerTab: View {
                 SliderRow(title: "Speed", value: $model.config.sensitivity, range: 6...60, format: "%.0f px/°")
                 SliderRow(title: "Dead zone", value: $model.config.deadzoneDPS, range: 0...5, format: "%.1f °/s")
                 SliderRow(title: "Click steadying", value: $model.config.clickFreezeMS, range: 0...400, format: "%.0f ms")
+            }
+            Section {
+                Toggle("Snap the pointer onto buttons", isOn: $model.config.magnetEnabled)
+                SliderRow(title: "Snap distance", value: $model.config.magnetRadius, range: 10...120, format: "%.0f px")
+                SliderRow(title: "Breakaway", value: $model.config.magnetBreakaway, range: 15...150, format: "%.0f px")
+                SliderRow(title: "Wobble while snapped", value: $model.config.magnetStickiness, range: 0...0.6,
+                          format: "%.0f%%", scale: 100)
+            } header: {
+                Text("Magnetic buttons")
+            } footer: {
+                Text("When the pointer slows down near a button, link, checkbox, menu item or Dock icon, it glides onto it and holds there so you can click without your arm's wobble moving it off. Push past the breakaway distance, or move quickly, to pull free. Works in apps that support Accessibility, which is nearly all of them, including web pages in Safari and Chrome.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section {
                 Text("Point and turn the controller to move the cursor. Turning is measured around the real vertical, so it works however you roll your wrist. When it connects, set the controller down for a second so it can calibrate the gyro.")

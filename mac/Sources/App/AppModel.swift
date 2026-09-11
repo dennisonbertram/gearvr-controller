@@ -21,7 +21,10 @@ final class AppModel: ObservableObject {
     @Published private(set) var clutched = false
     @Published private(set) var live = LiveState()
     @Published var enabled = true {
-        didSet { if !enabled { mapper.reset() } }
+        didSet {
+            if !enabled { mapper.reset() }
+            updateMagnet()
+        }
     }
     @Published var pointerOn: Bool {
         didSet { mapper.pointerOn = pointerOn }
@@ -29,6 +32,8 @@ final class AppModel: ObservableObject {
     @Published var config: RemoteConfig {
         didSet {
             mapper.config = config
+            sink.magnet.settings = config.magnet
+            updateMagnet()
             save()
         }
     }
@@ -51,6 +56,8 @@ final class AppModel: ObservableObject {
     let verbose = CommandLine.arguments.contains("--verbose")
     private let link = ControllerLink()
     private let sink = EventSink()
+    private let scanner = TargetScanner()
+    private var magnetTimer: Timer?
     private let mapper: InputMapper
     private var latest: Packet?
     private var packets = 0
@@ -88,10 +95,15 @@ final class AppModel: ObservableObject {
             self.deviceName = self.link.deviceName
             self.log("state: \(state)")
             if state != .streaming { self.mapper.bias.reset() }
+            self.updateMagnet()
         }
         link.onDisconnect = { [weak self] in self?.mapper.reset() }
         link.onPacket = { [weak self] in self?.handle($0) }
         link.start()
+
+        sink.magnet.settings = config.magnet
+        scanner.onTargets = { [weak self] targets in self?.sink.magnet.targets = targets }
+        updateMagnet()
 
         log("accessibility trusted: \(accessibilityTrusted)")
         if !accessibilityTrusted && !dryRun {
@@ -112,6 +124,25 @@ final class AppModel: ObservableObject {
         link.stop()
     }
 
+    /// Magnetic targets run only while the controller is actually driving the pointer.
+    private func updateMagnet() {
+        let active = config.magnetEnabled && enabled && linkState == .streaming
+        sink.magnetEnabled = active
+        if active {
+            scanner.start()
+            if magnetTimer == nil {
+                let t = Timer(timeInterval: 1.0 / 120, repeats: true) { [weak self] _ in self?.sink.magnetTick() }
+                RunLoop.main.add(t, forMode: .common) // keep running while menus are open
+                magnetTimer = t
+            }
+        } else {
+            scanner.stop()
+            magnetTimer?.invalidate()
+            magnetTimer = nil
+        }
+        log("magnet \(active ? "on" : "off")")
+    }
+
     private func handle(_ p: Packet) {
         latest = p
         packets += 1
@@ -128,9 +159,10 @@ final class AppModel: ObservableObject {
             log("accessibility trusted: \(trusted)")
         }
         if verbose, linkState == .streaming, let p = latest {
-            log(String(format: "%.0f pkt/s  battery %d%%  gyro %@  buttons %@", packetRate, p.battery,
+            log(String(format: "%.0f pkt/s  battery %d%%  gyro %@  buttons %@  magnet %@", packetRate, p.battery,
                        mapper.bias.calibrated ? "calibrated" : "calibrating",
-                       p.buttons.map(\.rawValue).sorted().joined(separator: ",")))
+                       p.buttons.map(\.rawValue).sorted().joined(separator: ","),
+                       sink.magnetEnabled ? "\(sink.magnet.targets.count) targets\(sink.magnet.locked != nil ? ", SNAPPED" : "")" : "off"))
         }
     }
 

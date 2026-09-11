@@ -283,5 +283,114 @@ test("config round-trips and tolerates missing keys") {
     check(Action("key:cmd+[") == .key("cmd+[") && Action("key:cmd+[").string == "key:cmd+[", "action strings")
 }
 
+// MARK: magnet
+
+final class MagnetRig {
+    let m = Magnet()
+    var p = CGPoint(x: 100, y: 100)
+    var t: TimeInterval = 10
+
+    /// hand motion of `d` per 5 ms step
+    func move(_ d: CGVector, steps: Int = 1) {
+        for _ in 0..<steps {
+            t += 0.005
+            p = m.userMove(from: p, by: d, at: t)
+            if let q = m.tick(cursor: p, at: t) { p = q }
+        }
+    }
+
+    /// hand held still for `seconds`
+    func rest(_ seconds: Double) {
+        let steps = Int(seconds / 0.008)
+        for _ in 0..<steps {
+            t += 0.008
+            if let q = m.tick(cursor: p, at: t) { p = q }
+        }
+    }
+}
+
+test("magnet: resting near a button snaps onto its centre") {
+    let r = MagnetRig()
+    r.m.targets = [CGRect(x: 120, y: 90, width: 40, height: 20)] // 20 px to the right
+    r.rest(0.4)
+    check(r.m.locked != nil, "locked")
+    check(abs(r.p.x - 140) < 1 && abs(r.p.y - 100) < 1, "centred at \(r.p)")
+}
+
+test("magnet: far targets are ignored") {
+    let r = MagnetRig()
+    r.m.targets = [CGRect(x: 300, y: 300, width: 40, height: 20)]
+    r.rest(0.4)
+    check(r.m.locked == nil && r.p == CGPoint(x: 100, y: 100), "untouched \(r.p)")
+}
+
+test("magnet: moving fast past a button does not grab") {
+    let r = MagnetRig()
+    r.m.targets = [CGRect(x: 110, y: 90, width: 30, height: 20)]
+    r.move(CGVector(dx: 6, dy: 0), steps: 30) // 1200 px/s
+    check(r.m.locked == nil, "not locked while fast")
+    check(r.p.x > 270, "kept going: \(r.p)")
+}
+
+test("magnet: tremor while snapped stays on the button") {
+    let r = MagnetRig()
+    let button = CGRect(x: 120, y: 90, width: 40, height: 20)
+    r.m.targets = [button]
+    r.rest(0.4)
+    for i in 0..<200 { r.move(CGVector(dx: i % 2 == 0 ? 1.5 : -1.5, dy: i % 3 == 0 ? 1 : -0.5)) }
+    check(r.m.locked != nil && button.contains(r.p), "still on button: \(r.p)")
+}
+
+test("magnet: a deliberate push breaks free in that direction") {
+    let r = MagnetRig()
+    r.m.targets = [CGRect(x: 120, y: 90, width: 40, height: 20)]
+    r.rest(0.4)
+    r.move(CGVector(dx: 1.2, dy: 0), steps: 60) // steady push right: 72 px of hand motion at 240 px/s
+    check(r.m.locked == nil, "released")
+    check(r.p.x > 180, "popped out to the right: \(r.p)")
+    r.rest(0.3)
+    check(r.m.locked == nil, "doesn't re-grab the button it just left")
+}
+
+test("magnet: innermost target wins when nested") {
+    let r = MagnetRig()
+    r.p = CGPoint(x: 150, y: 150)
+    r.m.targets = [CGRect(x: 100, y: 100, width: 200, height: 100), CGRect(x: 140, y: 140, width: 30, height: 20)]
+    check(r.m.nearest(to: r.p) == CGRect(x: 140, y: 140, width: 30, height: 20), "smallest under the pointer")
+}
+
+test("magnet: target vanishing releases the lock") {
+    let r = MagnetRig()
+    r.m.targets = [CGRect(x: 120, y: 90, width: 40, height: 20)]
+    r.rest(0.3)
+    r.m.targets = []
+    check(r.m.locked == nil, "released")
+}
+
+test("magnet: a target that shifts a few pixels between scans stays locked") {
+    let r = MagnetRig()
+    let a = CGRect(x: 120, y: 90, width: 44, height: 56), neighbour = CGRect(x: 76, y: 90, width: 44, height: 56)
+    r.p = CGPoint(x: 150, y: 80) // 10 px above `a`, ~32 px from the neighbour
+    r.m.targets = [neighbour, a]
+    r.rest(0.3)
+    check(r.m.locked == a, "locked on the nearest")
+    let shifted = a.offsetBy(dx: 3, dy: -2)
+    r.m.targets = [neighbour.offsetBy(dx: 3, dy: -2), shifted]
+    r.rest(0.3)
+    check(r.m.locked == shifted, "followed the shifted target, not the neighbour: \(String(describing: r.m.locked))")
+    check(abs(r.p.x - shifted.midX) < 1 && abs(r.p.y - shifted.midY) < 1, "centred on it")
+}
+
+test("magnet: a target that blinks out and back is grabbed again") {
+    let r = MagnetRig()
+    let a = CGRect(x: 120, y: 90, width: 40, height: 20)
+    r.m.targets = [a]
+    r.rest(0.3)
+    r.m.targets = []
+    r.m.targets = [a]
+    r.rest(0.2)
+    check(r.m.locked == a, "relocked")
+}
+
 print("\n\(passed) checks passed, \(failures) failed")
 exit(failures == 0 ? 0 : 1)

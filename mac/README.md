@@ -58,6 +58,16 @@ The defaults match `../config.toml`:
 | Back | Escape |
 | Volume ± | system volume |
 | Trigger + touch bottom of pad | **clutch:** freeze the cursor while you re-home your hand, release the trigger to resume |
+| Slow down near a button | **magnetic buttons:** the pointer snaps onto it and holds still so you can click. Push past the breakaway distance or move quickly to pull free |
+
+**Magnetic buttons** use the Accessibility API to find clickable things near the
+pointer: buttons, links, checkboxes, menu items, tabs, list rows, and Dock icons,
+including on web pages in Safari and Chrome. When your hand slows down within
+the snap distance of one, the pointer glides onto its center and your arm's
+wobble is damped until you push away deliberately. It only acts on
+controller-driven movement, so your trackpad and mouse behave normally. Turn it
+on or off in the menu, and tune snap distance, breakaway, and wobble under
+Settings → Pointer.
 
 The menu has quick switches for pausing control, the air-mouse, and the clutch,
 plus pointer speed, touchpad mode, and a live view of the buttons and touchpad.
@@ -81,8 +91,9 @@ You can also turn on launch at login there.
 
 Layout:
 
-* `Sources/Core`: protocol parser, config, and the input mapper (platform-free, fully tested)
-* `Sources/App`: CoreBluetooth link, Quartz event output, and the SwiftUI menu/settings UI
+* `Sources/Core`: protocol parser, config, input mapper, and magnet logic (platform-free, fully tested)
+* `Sources/App`: CoreBluetooth link, Quartz event output, the Accessibility target
+  scanner, and the SwiftUI menu/settings UI
 * `Tests/main.swift`: headless test runner (no XCTest needed)
 * `tools/make_icon.swift`: draws the app icon
 

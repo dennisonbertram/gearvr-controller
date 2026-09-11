@@ -12,6 +12,8 @@ struct MenuView: View {
                 SwitchRow(title: "Control this Mac", isOn: $model.enabled)
                 SwitchRow(title: "Air mouse", isOn: $model.pointerOn)
                     .disabled(!model.enabled)
+                SwitchRow(title: "Magnetic buttons", isOn: $model.config.magnetEnabled)
+                    .help("When the pointer slows down near a button, link or menu item, it snaps onto it and holds still so you can click.")
                 SwitchRow(title: "Re-home clutch", isOn: $model.config.clutchEnabled)
                     .help("Hold the trigger and touch the bottom of the touchpad to freeze the cursor while you reposition your hand.")
             }

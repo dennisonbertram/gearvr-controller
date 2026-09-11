@@ -51,8 +51,17 @@ final class EventSink: InputSink {
     var postEvents = true
     var log: ((String) -> Void)?
 
+    /// Snaps the pointer onto nearby clickable targets (see Magnet / TargetScanner).
+    let magnet = Magnet()
+    var magnetEnabled = false {
+        didSet { if !magnetEnabled { magnet.reset() } }
+    }
+
     private var held: Set<MouseButton> = []
-    private var frac = CGPoint.zero
+    private var virtual: CGPoint? // sub-pixel pointer position we drive
+    private var lastPosted: CGPoint?
+    private var recentPosts: [(time: TimeInterval, point: CGPoint)] = [] // for telling our lag from real moves
+    private var lastControllerMove = -Double.infinity
     private var bounds = CGRect.zero
     private var lastClick: (button: MouseButton, time: TimeInterval, count: Int64)?
 
@@ -84,23 +93,68 @@ final class EventSink: InputSink {
         }
     }
 
+    /// Where the pointer is, keeping our sub-pixel position unless something else
+    /// (a real mouse or trackpad) moved it.
+    private func currentPosition() -> CGPoint {
+        let real = location
+        guard let v = virtual, let last = lastPosted else { // first use: start from the real pointer
+            virtual = real
+            lastPosted = real
+            return real
+        }
+        // The window server applies posted events with a little lag, so the real pointer may
+        // still be at one of the positions we posted a moment ago. Anything else is another device.
+        let t = now
+        recentPosts.removeAll { t - $0.time > 0.15 }
+        if hypot(real.x - last.x, real.y - last.y) <= 2
+            || recentPosts.contains(where: { hypot(real.x - $0.point.x, real.y - $0.point.y) <= 2 }) {
+            return v
+        }
+        // moved by another device (trackpad, mouse): the magnet is only for the controller
+        log?("pointer moved externally (real \(real), expected \(last)); magnet released")
+        magnet.release()
+        virtual = real
+        lastPosted = real
+        return real
+    }
+
+    private var now: TimeInterval { ProcessInfo.processInfo.systemUptime }
+
     func move(dx: Double, dy: Double) {
-        frac.x += dx
-        frac.y += dy
-        let ix = frac.x.rounded(.towardZero), iy = frac.y.rounded(.towardZero)
-        guard ix != 0 || iy != 0 else { return }
-        frac.x -= ix
-        frac.y -= iy
-        var p = location
-        p.x = min(max(p.x + ix, bounds.minX), bounds.maxX - 1)
-        p.y = min(max(p.y + iy, bounds.minY), bounds.maxY - 1)
+        lastControllerMove = now
+        let p = currentPosition()
+        if magnetEnabled && held.isEmpty {
+            moveCursor(to: magnet.userMove(from: p, by: CGVector(dx: dx, dy: dy), at: now))
+        } else {
+            moveCursor(to: CGPoint(x: p.x + dx, y: p.y + dy))
+        }
+    }
+
+    /// Drives the magnet's glide and hold; call at a steady ~120 Hz.
+    func magnetTick() {
+        // only while the controller is the device steering the pointer
+        guard magnetEnabled, held.isEmpty, virtual != nil, now - lastControllerMove < 1.5 else { return }
+        let p = currentPosition()
+        if let q = magnet.tick(cursor: p, at: now) { moveCursor(to: q) }
+    }
+
+    private func moveCursor(to q: CGPoint) {
+        let c = CGPoint(x: min(max(q.x, bounds.minX), bounds.maxX - 1), y: min(max(q.y, bounds.minY), bounds.maxY - 1))
+        virtual = c
+        let ip = CGPoint(x: c.x.rounded(), y: c.y.rounded())
+        let from = lastPosted ?? location
+        guard ip != from else { return }
+        let t = now
+        recentPosts.append((t, from)) // where the pointer was before this event
+        recentPosts.removeAll { t - $0.time > 0.15 }
+        lastPosted = ip
         var type = CGEventType.mouseMoved, button = CGMouseButton.left
         if let h = [MouseButton.left, .right, .middle].first(where: held.contains) {
             (_, _, type, button) = Self.types(h)
         }
-        let e = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: p, mouseButton: button)
-        e?.setIntegerValueField(.mouseEventDeltaX, value: Int64(ix))
-        e?.setIntegerValueField(.mouseEventDeltaY, value: Int64(iy))
+        let e = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: ip, mouseButton: button)
+        e?.setIntegerValueField(.mouseEventDeltaX, value: Int64(ip.x - from.x))
+        e?.setIntegerValueField(.mouseEventDeltaY, value: Int64(ip.y - from.y))
         post(e)
     }
 
@@ -117,8 +171,9 @@ final class EventSink: InputSink {
         } else {
             held.remove(b)
         }
-        let e = CGEvent(mouseEventSource: nil, mouseType: down ? t.down : t.up, mouseCursorPosition: location,
-                        mouseButton: t.button)
+        let p = currentPosition()
+        let e = CGEvent(mouseEventSource: nil, mouseType: down ? t.down : t.up,
+                        mouseCursorPosition: CGPoint(x: p.x.rounded(), y: p.y.rounded()), mouseButton: t.button)
         e?.setIntegerValueField(.mouseEventClickState, value: lastClick?.count ?? 1)
         log?("\(b.rawValue) \(down ? "down" : "up")")
         post(e)
