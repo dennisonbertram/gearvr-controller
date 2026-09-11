@@ -134,14 +134,11 @@ struct PointerTab: View {
             }
             Section {
                 Toggle("Snap the pointer onto buttons", isOn: $model.config.magnetEnabled)
-                SliderRow(title: "Snap distance", value: $model.config.magnetRadius, range: 10...120, format: "%.0f px")
-                SliderRow(title: "Breakaway", value: $model.config.magnetBreakaway, range: 15...150, format: "%.0f px")
-                SliderRow(title: "Wobble while snapped", value: $model.config.magnetStickiness, range: 0...0.6,
-                          format: "%.0f%%", scale: 100)
+                MagnetStrengthRow(strength: $model.config.magnetStrength)
             } header: {
                 Text("Magnetic buttons")
             } footer: {
-                Text("When the pointer slows down near a button, link, checkbox, menu item or Dock icon, it glides onto it and holds there so you can click without your arm's wobble moving it off. Push past the breakaway distance, or move quickly, to pull free. Works in apps that support Accessibility, which is nearly all of them, including web pages in Safari and Chrome.")
+                Text("Near buttons, links, checkboxes, menu items and Dock icons the pointer gets a little sticky: your motion is damped over them (most when you're nearly still, which cancels arm wobble) and bends slightly toward them as you approach. It never moves on its own. Past the middle of the slider it becomes a real magnet: the pointer snaps onto the nearest button and holds, a small push hops to the next one, and a push into empty space pulls free. Works in apps that support Accessibility, which is nearly all of them, including web pages in Safari and Chrome.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {
@@ -236,6 +233,26 @@ struct GeneralTab: View {
 }
 
 // MARK: shared controls
+
+struct MagnetStrengthRow: View {
+    @Binding var strength: Double
+
+    var body: some View {
+        let m = MagnetSettings(strength: strength)
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Text("Magnet strength")
+                Spacer()
+                Text(m.describes).font(.caption).foregroundStyle(.secondary)
+            }
+            HStack(spacing: 6) {
+                Text("Subtle").font(.caption).foregroundStyle(.secondary)
+                Slider(value: $strength, in: 0...1)
+                Text("Strong").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+}
 
 private struct SliderRow: View {
     let title: String

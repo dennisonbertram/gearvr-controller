@@ -13,7 +13,12 @@ struct MenuView: View {
                 SwitchRow(title: "Air mouse", isOn: $model.pointerOn)
                     .disabled(!model.enabled)
                 SwitchRow(title: "Magnetic buttons", isOn: $model.config.magnetEnabled)
-                    .help("When the pointer slows down near a button, link or menu item, it snaps onto it and holds still so you can click.")
+                    .help("Makes buttons, links and menu items slightly sticky so arm wobble doesn't knock the pointer off them.")
+                if model.config.magnetEnabled {
+                    MagnetStrengthRow(strength: $model.config.magnetStrength)
+                        .controlSize(.small)
+                        .padding(.leading, 12)
+                }
                 SwitchRow(title: "Re-home clutch", isOn: $model.config.clutchEnabled)
                     .help("Hold the trigger and touch the bottom of the touchpad to freeze the cursor while you reposition your hand.")
             }

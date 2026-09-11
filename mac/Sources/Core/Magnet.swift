@@ -1,18 +1,44 @@
-// "Magnetic" pointer assist: when the pointer slows down near a clickable target it
-// glides onto the target's centre and holds there, absorbing hand tremor. Pushing
-// past `breakaway` pixels of hand motion (or moving fast) pops it free.
+// "Magnetic" pointer assist for clickable targets, in two strengths:
+//  * assist (default, subtle): the pointer never moves on its own. Over a target your
+//    motion is scaled down (more so when nearly still, which damps tremor), and while
+//    you move toward a target your direction bends slightly toward its centre.
+//  * snap (strong): when the pointer slows near a target it glides onto the centre and
+//    holds; a push toward a neighbour hops to it, a push into empty space pops it free.
 //
 // Pure logic in global display coordinates (top-left origin, like Quartz and AX).
 import CoreGraphics
 import Foundation
 
 public struct MagnetSettings: Equatable {
-    public var radius = 40.0 // px from a target's edge at which snapping starts
-    public var breakaway = 45.0 // px of hand motion needed to pull free
-    public var stickiness = 0.25 // fraction of hand motion the pointer shows while snapped
-    public var slowSpeed = 350.0 // px/s; snapping only engages below this pointer speed
+    public var snap = true // glide onto targets and hold (strong mode)
+    public var radius = 40.0 // px from a target's edge: reach for steering / snapping
+    public var breakaway = 45.0 // snap: px of hand motion needed to pull free
+    public var stickiness = 0.25 // snap: fraction of hand motion the pointer shows while held
+    public var slowSpeed = 350.0 // snap: engages only below this pointer speed (px/s)
+    public var friction = 1.0 // assist: motion scale over a target
+    public var stillFriction = 1.0 // assist: motion scale over a target when nearly still (tremor)
+    public var steer = 0.0 // assist: how much motion toward a target bends toward its centre
+
+    static let snapThreshold = 0.55
 
     public init() {}
+
+    /// One knob from subtle (0) to strong (1). Up to `snapThreshold` it only assists your
+    /// own motion; above it the pointer snaps onto targets.
+    public init(strength s: Double) {
+        let k = min(max(s, 0), 1)
+        let assist = min(k / Self.snapThreshold, 1)
+        snap = k > Self.snapThreshold
+        radius = 12 + 30 * k
+        friction = 1 - 0.55 * assist
+        stillFriction = friction * 0.6
+        steer = 0.6 * assist
+        let t = max(0, (k - Self.snapThreshold) / (1 - Self.snapThreshold))
+        breakaway = 14 + 40 * t
+        stickiness = 0.5 - 0.3 * t
+    }
+
+    public var describes: String { snap ? "snaps onto buttons" : "helps you stop on buttons" }
 }
 
 public final class Magnet {
@@ -73,13 +99,21 @@ public final class Magnet {
         speed = 0.85 * speed + 0.15 * (hypot(d.dx, d.dy) / dt)
 
         guard let l = locked else {
-            let q = CGPoint(x: p.x + d.dx, y: p.y + d.dy)
+            let m = assisted(d, at: p)
+            let q = CGPoint(x: p.x + m.dx, y: p.y + m.dy)
             if let r = released, !r.insetBy(dx: -settings.radius, dy: -settings.radius).contains(q) { released = nil }
             return q
         }
         escape.dx += d.dx
         escape.dy += d.dy
-        if hypot(escape.dx, escape.dy) > settings.breakaway || speed > settings.slowSpeed * Self.fastFactor {
+        // A push toward a neighbouring target hops straight to it (traffic lights, toolbars,
+        // menus), so stepping between close targets doesn't need a full breakaway.
+        if let next = neighbour(of: l, toward: escape) {
+            locked = next
+            escape = .zero
+            return CGPoint(x: p.x + d.dx * settings.stickiness, y: p.y + d.dy * settings.stickiness)
+        }
+        if hypot(escape.dx, escape.dy) > breakaway(for: l) || speed > settings.slowSpeed * Self.fastFactor {
             let out = CGPoint(x: l.midX + escape.dx, y: l.midY + escape.dy)
             release()
             return out
@@ -106,10 +140,55 @@ public final class Magnet {
             return step(p, toward: goal)
         }
 
-        guard speed < settings.slowSpeed, let target = nearest(to: p) else { return nil }
+        guard settings.snap, speed < settings.slowSpeed, let target = nearest(to: p) else { return nil }
         locked = target
         escape = .zero
         return step(p, toward: CGPoint(x: target.midX, y: target.midY))
+    }
+
+    /// Assist mode: shape the hand's own motion near a target. Never adds motion of its own.
+    func assisted(_ d: CGVector, at p: CGPoint) -> CGVector {
+        let len = hypot(d.dx, d.dy)
+        guard len > 0, let t = nearest(to: p) else { return d }
+        var m = d
+        // steer: bend the direction toward the centre while approaching, keeping your speed
+        let cx = Double(t.midX - p.x), cy = Double(t.midY - p.y)
+        let cd = hypot(cx, cy)
+        if settings.steer > 0, cd > 1, Double(d.dx) * cx + Double(d.dy) * cy > 0 {
+            let edge = hypot(max(t.minX - p.x, 0, p.x - t.maxX), max(t.minY - p.y, 0, p.y - t.maxY))
+            let w = settings.steer * max(0, 1 - Double(edge) / settings.radius)
+            let ux = Double(d.dx) / len + w * cx / cd, uy = Double(d.dy) / len + w * cy / cd
+            let un = hypot(ux, uy)
+            if un > 0 { m = CGVector(dx: ux / un * len, dy: uy / un * len) }
+        }
+        // friction: slower over the target, more so when nearly still (damps tremor)
+        if t.insetBy(dx: -3, dy: -3).contains(p) {
+            let f = speed < 80 ? settings.stillFriction : settings.friction
+            m = CGVector(dx: m.dx * f, dy: m.dy * f)
+        }
+        return m
+    }
+
+    /// Small targets hold less firmly: leaving a 14 px button shouldn't take a 45 px push.
+    func breakaway(for r: CGRect) -> Double {
+        min(settings.breakaway, max(12, 1.25 * Double(max(r.width, r.height))))
+    }
+
+    /// The closest target roughly in the direction of the push `e`, once the push covers
+    /// enough of the gap between the two centres.
+    func neighbour(of l: CGRect, toward e: CGVector) -> CGRect? {
+        let push = hypot(e.dx, e.dy)
+        guard push > 4 else { return nil }
+        var best: (rect: CGRect, gap: Double)?
+        for t in targets where !Self.similar(t, l) {
+            let vx = Double(t.midX - l.midX), vy = Double(t.midY - l.midY)
+            let gap = hypot(vx, vy)
+            guard gap > 1, gap < 140 else { continue }
+            let along = (Double(e.dx) * vx + Double(e.dy) * vy) / gap // push component toward t
+            guard along / push > 0.8, along >= min(max(0.4 * gap, 6), breakaway(for: l)) else { continue }
+            if best == nil || gap < best!.gap { best = (t, gap) }
+        }
+        return best?.rect
     }
 
     func nearest(to p: CGPoint) -> CGRect? {

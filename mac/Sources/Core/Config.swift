@@ -85,17 +85,9 @@ public struct RemoteConfig: Codable, Equatable {
 
     // magnetic targets: snap onto nearby buttons when the pointer slows down
     public var magnetEnabled = true
-    public var magnetRadius = 40.0
-    public var magnetBreakaway = 45.0
-    public var magnetStickiness = 0.25
+    public var magnetStrength = 0.25 // 0 subtle ... 1 strong; above 0.55 it snaps
 
-    public var magnet: MagnetSettings {
-        var m = MagnetSettings()
-        m.radius = magnetRadius
-        m.breakaway = magnetBreakaway
-        m.stickiness = magnetStickiness
-        return m
-    }
+    public var magnet: MagnetSettings { MagnetSettings(strength: magnetStrength) }
 
     public var gestures: [String: String] = [
         "swipe_left": "key:left",
@@ -123,7 +115,6 @@ public struct RemoteConfig: Codable, Equatable {
         take(.clutchEnabled, &clutchEnabled); take(.clutchButton, &clutchButton); take(.clutchZone, &clutchZone)
         take(.clutchZoneSize, &clutchZoneSize); take(.dragThresholdPX, &dragThresholdPX)
         take(.clutchSound, &clutchSound); take(.gestures, &gestures)
-        take(.magnetEnabled, &magnetEnabled); take(.magnetRadius, &magnetRadius)
-        take(.magnetBreakaway, &magnetBreakaway); take(.magnetStickiness, &magnetStickiness)
+        take(.magnetEnabled, &magnetEnabled); take(.magnetStrength, &magnetStrength)
     }
 }

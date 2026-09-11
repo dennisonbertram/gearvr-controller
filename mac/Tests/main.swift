@@ -352,6 +352,90 @@ test("magnet: a deliberate push breaks free in that direction") {
     check(r.m.locked == nil, "doesn't re-grab the button it just left")
 }
 
+test("magnet (subtle): never moves the pointer on its own") {
+    let r = MagnetRig()
+    r.m.settings = MagnetSettings(strength: 0.25)
+    r.m.targets = [CGRect(x: 110, y: 95, width: 20, height: 14)]
+    r.rest(0.5)
+    check(r.p == CGPoint(x: 100, y: 100) && r.m.locked == nil, "untouched: \(r.p)")
+}
+
+test("magnet (subtle): motion is damped over a button, strongly when nearly still") {
+    let button = CGRect(x: 100, y: 100, width: 40, height: 20)
+    func travel(start: CGPoint, step: CGVector, targets: [CGRect]) -> Double {
+        let r = MagnetRig()
+        r.m.settings = MagnetSettings(strength: 0.25)
+        r.m.targets = targets
+        r.p = start
+        r.move(step, steps: 20)
+        return hypot(r.p.x - start.x, r.p.y - start.y)
+    }
+    let inside = CGPoint(x: 120, y: 110)
+    let freeMoving = travel(start: inside, step: CGVector(dx: 1, dy: 0), targets: [])
+    let onButtonMoving = travel(start: inside, step: CGVector(dx: 1, dy: 0), targets: [button])
+    let onButtonTremor = travel(start: inside, step: CGVector(dx: 0.2, dy: 0), targets: [button])
+    check(onButtonMoving < freeMoving * 0.9 && onButtonMoving > freeMoving * 0.5, "moderate friction: \(onButtonMoving) vs \(freeMoving)")
+    check(onButtonTremor < 4 * 0.6, "tremor damped harder: \(onButtonTremor)")
+}
+
+test("magnet (subtle): approaching bends toward the centre, leaving is not pulled back") {
+    let button = CGRect(x: 150, y: 100, width: 30, height: 20) // centre (165, 110)
+    let r = MagnetRig()
+    r.m.settings = MagnetSettings(strength: 0.25)
+    r.m.targets = [button]
+    r.p = CGPoint(x: 135, y: 97) // above-left, heading right
+    r.move(CGVector(dx: 2, dy: 0), steps: 6)
+    check(r.p.y > 97.5, "bent down toward the button: \(r.p)")
+    let away = MagnetRig()
+    away.m.settings = MagnetSettings(strength: 0.25)
+    away.m.targets = [button]
+    away.p = CGPoint(x: 190, y: 97) // right of the button, heading further right
+    away.move(CGVector(dx: 2, dy: 0), steps: 6)
+    check(abs(away.p.y - 97) < 0.01, "no pull when leaving: \(away.p)")
+}
+
+test("magnet: step across the traffic lights with small pushes") {
+    let r = MagnetRig()
+    r.m.settings = MagnetSettings(strength: 0.8)
+    // close, minimise, zoom: 14 px buttons, 20 px apart
+    let lights = [0, 20, 40].map { CGRect(x: 200 + $0, y: 100, width: 14, height: 14) }
+    r.m.targets = lights
+    r.p = CGPoint(x: 204, y: 118) // just below the close button
+    r.rest(0.3)
+    check(r.m.locked == lights[0], "on close")
+    r.move(CGVector(dx: 0.5, dy: 0), steps: 20) // ~10 px push right at 100 px/s
+    r.rest(0.3)
+    check(r.m.locked == lights[1], "hopped to minimise: \(String(describing: r.m.locked))")
+    check(abs(r.p.x - lights[1].midX) < 1, "centred on minimise: \(r.p)")
+    r.move(CGVector(dx: 0.5, dy: 0), steps: 20)
+    r.rest(0.3)
+    check(r.m.locked == lights[2], "hopped to zoom")
+    r.move(CGVector(dx: -0.5, dy: 0), steps: 20)
+    r.rest(0.3)
+    check(r.m.locked == lights[1], "and back to minimise")
+}
+
+test("magnet: leaving a small button into empty space takes a short push") {
+    let r = MagnetRig()
+    r.m.settings = MagnetSettings(strength: 0.8)
+    let close = CGRect(x: 200, y: 100, width: 14, height: 14)
+    r.m.targets = [close]
+    r.p = CGPoint(x: 207, y: 120)
+    r.rest(0.3)
+    check(r.m.locked == close, "snapped")
+    r.move(CGVector(dx: 0, dy: 0.8), steps: 30) // ~24 px push down
+    check(r.m.locked == nil && r.p.y > 125, "free below the button: \(r.p)")
+}
+
+test("magnet: strength knob goes from subtle assist to snapping") {
+    let subtle = MagnetSettings(strength: 0.25), strong = MagnetSettings(strength: 1)
+    check(!subtle.snap && strong.snap, "only the strong end snaps")
+    check(subtle.friction > 0.6 && subtle.friction < 1, "subtle friction \(subtle.friction)")
+    check(subtle.radius < strong.radius && strong.stickiness < 0.5, "reach grows, hold firms up")
+    check(!MagnetSettings(strength: 0).snap && MagnetSettings(strength: 0).friction == 1, "zero does nothing")
+    check(RemoteConfig().magnetStrength == 0.25, "default is subtle")
+}
+
 test("magnet: innermost target wins when nested") {
     let r = MagnetRig()
     r.p = CGPoint(x: 150, y: 150)

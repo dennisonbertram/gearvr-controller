@@ -58,16 +58,18 @@ The defaults match `../config.toml`:
 | Back | Escape |
 | Volume ± | system volume |
 | Trigger + touch bottom of pad | **clutch:** freeze the cursor while you re-home your hand, release the trigger to resume |
-| Slow down near a button | **magnetic buttons:** the pointer snaps onto it and holds still so you can click. Push past the breakaway distance or move quickly to pull free |
+| Near a button | **magnetic buttons:** buttons are slightly sticky, so arm wobble doesn't knock the pointer off them |
 
 **Magnetic buttons** use the Accessibility API to find clickable things near the
 pointer: buttons, links, checkboxes, menu items, tabs, list rows, and Dock icons,
-including on web pages in Safari and Chrome. When your hand slows down within
-the snap distance of one, the pointer glides onto its center and your arm's
-wobble is damped until you push away deliberately. It only acts on
-controller-driven movement, so your trackpad and mouse behave normally. Turn it
-on or off in the menu, and tune snap distance, breakaway, and wobble under
-Settings → Pointer.
+including on web pages in Safari and Chrome. By default the effect is subtle
+and the pointer never moves on its own. Your motion is damped over a button
+(most when you're nearly still, which cancels tremor) and bends slightly toward
+a button you're heading for. Drag the strength slider in the menu past the
+middle and it becomes a true magnet: the pointer snaps onto the nearest button
+and holds, a small push hops to the next one (handy for the window traffic
+lights or menus), and a push into empty space pulls free. It only acts on
+controller-driven movement, so your trackpad and mouse behave normally.
 
 The menu has quick switches for pausing control, the air-mouse, and the clutch,
 plus pointer speed, touchpad mode, and a live view of the buttons and touchpad.
