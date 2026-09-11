@@ -139,7 +139,11 @@ async function use(kind) {
   try {
     await source.connect();
   } catch (err) {
-    setStatus(`${kind}: ${err.message || err}`);
+    const busy = kind === 'bluetooth' && err.name === 'NotFoundError';
+    setStatus(busy
+      ? 'no controller found: quit remote.py / bridge.py (it allows one connection), wake it with HOME, retry'
+      : kind === 'bridge' ? 'bridge not running: start remote.py --viewer or bridge.py'
+      : `${kind}: ${err.message || err}`);
     if (kind !== 'demo') setTimeout(() => { if (!latest || !connected) use('demo'); }, 2500);
   }
 }

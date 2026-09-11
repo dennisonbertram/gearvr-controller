@@ -94,7 +94,7 @@ export class BluetoothSource extends Source {
 }
 
 export class BridgeSource extends Source {
-  connect(url = `ws://${location.hostname || 'localhost'}:8765/ws`) {
+  connect(url = 'ws://localhost:8765/ws') { // the bridge only ever runs on this machine
     return new Promise((resolve, reject) => {
       this.onStatus('connecting to bridge');
       const ws = new WebSocket(url);
