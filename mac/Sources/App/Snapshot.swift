@@ -27,6 +27,7 @@ enum Snapshot {
                 render(TouchpadTab().frame(width: 520), model: model, to: "\(dir)/settings-touchpad.png")
                 render(ClutchTab().frame(width: 520), model: model, to: "\(dir)/settings-clutch.png")
                 render(GeneralTab().frame(width: 520), model: model, to: "\(dir)/settings-general.png")
+                render(CalibrationView(model: model) {}, model: model, to: "\(dir)/calibrate.png")
                 let session = TrainingSession()
                 session.canvas = CGSize(width: 1000, height: 640)
                 let view = { TrainingView(session: session, model: model, close: {}).frame(width: 1000, height: 640) }

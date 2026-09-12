@@ -75,6 +75,11 @@ controller-driven movement, so your trackpad and mouse behave normally.
 adapts to speed: slow, careful movements are steadied, and fast moves come through
 without lag. Set it to 0% to turn it off.
 
+**Recalibrate** (the *Recalibrate…* button in the menu) re-measures the gyro's
+zero point: put the controller down, press Start, and leave it still for two
+seconds. Use it if the pointer creeps on its own while your hand is still. If the
+controller moves during the measurement it says so and keeps the old calibration.
+
 **Training** (the *Training…* button in the menu) is a one-minute aiming exercise.
 You click 15 targets that shrink to the size of a window's close button. It
 measures your hand tremor from the gyro, how directly you reach each target, and

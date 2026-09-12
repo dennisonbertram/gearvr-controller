@@ -147,6 +147,9 @@ struct PointerTab: View {
                 LabeledContent("Not sure what suits you?") {
                     Button("Start training…") { model.showTraining() }
                 }
+                LabeledContent("Pointer drifting on its own?") {
+                    Button("Recalibrate gyro…") { model.showCalibration() }
+                }
                 Text("Point and turn the controller to move the cursor. Turning is measured around the real vertical, so it works however you roll your wrist. When it connects, set the controller down for a second so it can calibrate the gyro. Smoothing adapts to speed: it steadies slow, careful movement and stays out of the way when you move fast.")
                     .font(.caption).foregroundStyle(.secondary)
             }

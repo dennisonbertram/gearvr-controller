@@ -21,6 +21,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var accessibilityTrusted = AXIsProcessTrusted()
     @Published private(set) var clutched = false
     @Published private(set) var live = LiveState()
+    @Published private(set) var calibration = GyroBias.Calibration.idle
     @Published var enabled = true {
         didSet {
             if !enabled { mapper.reset() }
@@ -59,6 +60,7 @@ final class AppModel: ObservableObject {
     private let sink = EventSink()
     private let scanner = TargetScanner()
     let training = TrainingWindow()
+    let calibrationWindow = CalibrationWindow()
     private var magnetTimer: Timer?
     private let mapper: InputMapper
     private var latest: Packet?
@@ -86,6 +88,16 @@ final class AppModel: ObservableObject {
         mapper.onPointerToggle = { [weak self] on in
             self?.pointerOn = on
             self?.log("air-mouse \(on ? "on" : "off")")
+        }
+        mapper.bias.onCalibration = { [weak self] state in
+            self?.calibration = state
+            if case .finished(let ok, let drift, _) = state {
+                self?.log(ok ? String(format: "recalibrated, drift was %.2f dps", drift) : "recalibration rejected: it moved")
+            }
+        }
+        calibrationWindow.onClose = { [weak self] in
+            self?.mapper.bias.cancelManualCalibration()
+            self?.calibration = .idle
         }
         mapper.onClutch = { [weak self] on in
             self?.clutched = on
@@ -192,6 +204,18 @@ final class AppModel: ObservableObject {
 
     func showTraining() { training.show(model: self) }
 
+    func showCalibration() {
+        calibration = .idle
+        calibrationWindow.show(model: self)
+    }
+
+    func startCalibration() { mapper.bias.startManualCalibration() }
+
+    func cancelCalibration() {
+        mapper.bias.cancelManualCalibration()
+        calibration = .idle
+    }
+
     func presentSettings(_ tab: SettingsTab? = nil) {
         if let tab { settingsTab = tab }
         guard let open = openSettingsAction else { pendingSettings = true; return }
@@ -231,6 +255,7 @@ final class AppModel: ObservableObject {
         case .connecting: return "Connecting…"
         case .handshaking: return "Starting sensors…"
         case .streaming:
+            if case .collecting = calibration { return "Recalibrating — keep it still" }
             if !enabled { return "Connected · paused" }
             if clutched { return "Clutch held — release the trigger to resume" }
             return mapper.bias.calibrated || live.gyroCalibrated ? "Connected" : "Connected · hold still to calibrate"

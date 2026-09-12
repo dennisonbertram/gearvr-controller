@@ -46,15 +46,76 @@ public struct AdaptiveSmoother {
 }
 
 /// Tracks the gyro zero-offset, re-estimating it whenever the controller is still.
+/// A manual recalibration can also be requested: it collects a fixed run of samples and
+/// only accepts them if the controller really was still.
 public final class GyroBias {
+    public enum Calibration: Equatable {
+        case idle
+        case collecting(progress: Double)
+        case finished(ok: Bool, driftDPS: Double, wobbleDPS: Double)
+    }
+
     public private(set) var bias = SIMD3<Double>.zero
     public var calibrated = false
+    /// Progress and result of a manual recalibration (also reported through `onCalibration`).
+    public private(set) var manual = Calibration.idle
+    public var onCalibration: ((Calibration) -> Void)?
+    public var isCollecting: Bool { if case .collecting = manual { return true }; return false }
+
     private var window: [SIMD3<Double>] = []
     private let size: Int
+    private var manualSamples: [SIMD3<Double>] = []
+    private var manualTarget = 0
+    /// Hand-held stillness: a bit looser than the automatic detector, which needs certainty.
+    static let manualWobbleLimit = 1.5
 
     public init(window size: Int = 100) { self.size = size }
 
+    /// Collects `sampleCount` samples (~2 s at 206 Hz) and adopts their mean if steady enough.
+    public func startManualCalibration(sampleCount: Int = 412) {
+        manualSamples.removeAll(keepingCapacity: true)
+        manualTarget = sampleCount
+        setManual(.collecting(progress: 0))
+    }
+
+    public func cancelManualCalibration() {
+        manualSamples.removeAll(keepingCapacity: true)
+        manualTarget = 0
+        setManual(.idle)
+    }
+
+    private func setManual(_ state: Calibration) {
+        manual = state
+        onCalibration?(state)
+    }
+
+    private func collectManual(_ g: SIMD3<Double>) {
+        manualSamples.append(g)
+        if manualSamples.count < manualTarget {
+            if manualSamples.count % 20 == 0 {
+                setManual(.collecting(progress: Double(manualSamples.count) / Double(manualTarget)))
+            }
+            return
+        }
+        let mean = manualSamples.reduce(.zero, +) / Double(manualSamples.count)
+        let variance = manualSamples.reduce(SIMD3<Double>.zero) { $0 + ($1 - mean) * ($1 - mean) } / Double(manualSamples.count)
+        let wobble = variance.squareRoot().max()
+        let ok = wobble < Self.manualWobbleLimit
+        if ok {
+            bias = mean
+            calibrated = true
+            window.removeAll(keepingCapacity: true)
+        }
+        manualSamples.removeAll(keepingCapacity: true)
+        manualTarget = 0
+        setManual(.finished(ok: ok, driftDPS: simd_length(mean), wobbleDPS: wobble))
+    }
+
     public func update(_ g: SIMD3<Double>) {
+        if isCollecting {
+            collectManual(g)
+            return
+        }
         window.append(g)
         guard window.count >= size else { return }
         let mean = window.reduce(.zero, +) / Double(window.count)
@@ -74,6 +135,7 @@ public final class GyroBias {
     public func reset() {
         window.removeAll()
         calibrated = false
+        cancelManualCalibration()
     }
 }
 
@@ -246,7 +308,8 @@ public final class InputMapper {
             guard let last = lastTimestamp else { lastTimestamp = s.timestampUS; continue }
             let dt = Double(s.timestampUS &- last) / 1e6
             lastTimestamp = s.timestampUS
-            guard dt > 0, dt < 0.1, pointerOn, bias.calibrated, now() >= freezeUntil else { continue }
+            guard dt > 0, dt < 0.1, pointerOn, bias.calibrated, !bias.isCollecting,
+                  now() >= freezeUntil else { continue }
 
             let w = s.gyro - bias.bias
             let u = simd_normalize(up)

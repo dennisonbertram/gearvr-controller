@@ -314,6 +314,38 @@ test("config: v1 settings on the old default speed move to the new default") {
     check(RemoteConfig().version == RemoteConfig.currentVersion && RemoteConfig().sensitivity == 18, "new default")
 }
 
+test("manual recalibration: adopts the zero point when the controller is still") {
+    let b = GyroBias()
+    var states: [GyroBias.Calibration] = []
+    b.onCalibration = { states.append($0) }
+    b.startManualCalibration(sampleCount: 200)
+    check(b.isCollecting, "collecting")
+    for i in 0..<200 { b.update(SIMD3(-1.1, -4.5, 1.8) + SIMD3(0.1 * sin(Double(i)), 0, 0)) }
+    check(!b.isCollecting, "finished")
+    if case .finished(let ok, let drift, let wobble) = b.manual {
+        check(ok, "accepted (wobble \(wobble))")
+        check(abs(drift - simd_length(SIMD3<Double>(-1.1, -4.5, 1.8))) < 0.1, "reports the drift it removed")
+    } else {
+        check(false, "state \(b.manual)")
+    }
+    check(b.calibrated && simd_length(b.bias - SIMD3(-1.1, -4.5, 1.8)) < 0.2, "bias set: \(b.bias)")
+    check(states.contains { if case .collecting = $0 { return true }; return false }, "reported progress")
+}
+
+test("manual recalibration: rejects a moving controller and keeps the old zero") {
+    let b = GyroBias()
+    for _ in 0..<100 { b.update(SIMD3(1, 1, 1)) } // settle an automatic bias first
+    let before = b.bias
+    b.startManualCalibration(sampleCount: 200)
+    for i in 0..<200 { b.update(SIMD3(20 * sin(Double(i) / 5), 0, 0)) } // waving it around
+    if case .finished(let ok, _, let wobble) = b.manual {
+        check(!ok && wobble > GyroBias.manualWobbleLimit, "rejected (wobble \(wobble))")
+    } else {
+        check(false, "state \(b.manual)")
+    }
+    check(b.bias == before, "old zero kept")
+}
+
 test("gyro bias calibrates when still") {
     let b = GyroBias()
     for _ in 0..<100 { b.update(SIMD3(-1.1, -4.5, 1.8)) }

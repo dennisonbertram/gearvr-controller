@@ -46,6 +46,8 @@ struct MenuView: View {
             Divider()
             HStack {
                 Button("Settings…") { model.presentSettings() }
+                Button("Recalibrate…") { model.showCalibration() }
+                    .help("Re-measure the gyro's zero point. Use this if the pointer drifts while your hand is still.")
                 Button("Training…") { model.showTraining() }
                     .help("A one-minute aiming exercise that suggests pointer speed, smoothing and magnet strength for you.")
                 Spacer()
