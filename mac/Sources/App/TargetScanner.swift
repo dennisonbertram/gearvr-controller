@@ -18,6 +18,9 @@ final class TargetScanner {
     private let systemWide = AXUIElementCreateSystemWide()
     private var lastScan: (point: CGPoint, time: TimeInterval)?
     private var tunedApps: Set<pid_t> = []
+    /// Accessibility requests to our own process are served on the calling thread, which would
+    /// drive SwiftUI off the main thread and trap. Our own windows are never snap targets anyway.
+    private let ownPID = getpid()
 
     static let clickableRoles: Set<String> = [
         "AXButton", "AXLink", "AXCheckBox", "AXRadioButton", "AXPopUpButton", "AXMenuButton",
@@ -74,7 +77,7 @@ final class TargetScanner {
         for q in probes {
             var hitRef: AXUIElement?
             guard AXUIElementCopyElementAtPosition(systemWide, Float(q.x), Float(q.y), &hitRef) == .success,
-                  let hit = hitRef else { continue }
+                  let hit = hitRef, pid(of: hit) != ownPID else { continue }
             let root = container(of: hit)
             if !roots.contains(where: { CFEqual($0, root) }) {
                 tune(app: hit)
@@ -128,6 +131,11 @@ final class TargetScanner {
         return unique
     }
 
+    private func pid(of element: AXUIElement) -> pid_t {
+        var pid: pid_t = 0
+        return AXUIElementGetPid(element, &pid) == .success ? pid : 0
+    }
+
     private static func distance(_ p: CGPoint, _ r: CGRect) -> Double {
         let dx = max(r.minX - p.x, 0, p.x - r.maxX), dy = max(r.minY - p.y, 0, p.y - r.maxY)
         return Double(hypot(dx, dy))
@@ -166,8 +174,8 @@ final class TargetScanner {
     /// Chromium and Electron only build their accessibility tree for assistive apps
     /// that ask for it; without this, web pages expose no buttons or links.
     private func tune(app hit: AXUIElement) {
-        var pid: pid_t = 0
-        guard AXUIElementGetPid(hit, &pid) == .success, !tunedApps.contains(pid) else { return }
+        let pid = pid(of: hit)
+        guard pid != 0, pid != ownPID, !tunedApps.contains(pid) else { return }
         tunedApps.insert(pid)
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)

@@ -12,7 +12,7 @@ cd "$(dirname "$0")"
 NAME="GearVR Remote"
 EXE="GearVRRemote"
 BUNDLE_ID="com.dennisonbertram.gearvr-remote"
-VERSION="${VERSION:-1.3.0}"
+VERSION="${VERSION:-1.3.1}"
 MIN_OS="14.0"
 APP="build/$NAME.app"
 FLAGS=(-swift-version 5 -O)
