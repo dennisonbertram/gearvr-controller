@@ -35,7 +35,35 @@ and polygraphene's FreePIE plugin gets the most right.
 | `0100` | sensor / start streaming | alone: ~30 pkt/s with gaps. After an acked `0800`: **68 pkt/s, no drops** |
 | `0400` | keep-alive | no ack, doesn't disturb the stream |
 | `0800` | VR mode (high rate) | **acked after ~1.5 s (new)**, see below |
-| `0200`, `0300`, `0500`, `0600`, `0700` | fw-update?, calibrate, "setting", LPM on/off | not exercised; `0200` may enter firmware update |
+| `0300` | reads a stored record **(new)** | stops the stream and replies with a constant 66-byte blob (below) |
+| `0500` | reads the device record **(new)** | stops the stream and replies with model, serial and touchpad range (below) |
+| `0600` / `0700` | low power mode on / off **(new)** | `0600` is acked and switches the sensors off while staying connected; `0700` resumes the slow (~33 pkt/s) stream on its own |
+| `0200` | unknown | never sent here; jsyang's notes suspect it starts a firmware update |
+| anything else (`0900`, `0a00`, `0f00`, `0101`, `0801`, `0b00`–`0e00`, `1000`) | ignored **(new)** | no ack, no reply; the sensor stream just stops |
+
+Reading the command characteristic returns the last command written, nothing more.
+
+### Device record, command `0500` (new)
+
+68 bytes: ten uint32 fields then a NUL-padded ASCII string.
+
+```
+05 00 00 00  0a 00 00 00  01 00 00 00  "QC1\0"  3f 00 00 00
+40 01 00 00  40 01 00 00  40 01 00 00  40 01 00 00  01 00 00 00
+"ET-YO324RF7J416JM1Z"
+```
+
+The four `0x140` values are 320, the touchpad's full-scale range (measured
+coordinates run 0–315). The string is the model plus the controller's real serial
+number — the Device Information service reports a placeholder serial of "123456"
+instead. The other fields (5, 10, 1, `QC1`, 63) are unidentified.
+
+### Stored record, command `0300` (new)
+
+Replies with 66 bytes that are byte-for-byte identical on every read, high entropy,
+and don't decode as int16 or float32. jsyang's notes label this command
+"calibrate", so it's plausibly a packed factory sensor calibration, but the format
+is unconfirmed.
 
 ### Command acknowledgement (new)
 
@@ -129,6 +157,23 @@ reports** on the HID `2A4D` characteristic (report ID 3, 16-bit usage):
 captured this way, and nothing arrived after a VR-mode session was stopped. The
 HID report map also declares a keyboard (report 1) and a vendor report 2 (1 byte,
 0–100), but neither has been seen in use.
+
+## Hardware: what isn't there
+
+Probing found no sign of the extras people often ask about, and the
+[user manual](https://content.etilize.com/User-Manual/1038754439.pdf) lists only
+touchpad, Home, Back, Volume, trigger, indicator light, battery cover and wrist strap:
+
+* **No vibration or haptics.** The accelerometer's sample-to-sample noise stays at
+  7.6–8.1 LSB through every command, including the unknown ones; a motor spinning
+  up would be obvious in that figure.
+* **No microphone or speaker.** There is no audio service in the GATT table and the
+  controller advertises BLE only, with no classic Bluetooth audio profiles.
+* The **indicator light** is driven by the firmware (pairing and charging state);
+  no command found here changes it.
+* The `FEF5` Dialog SUOTA service means the BLE SoC's firmware can in principle be
+  replaced over the air, which is the one genuine door to new hardware behaviour.
+  Untested here, and a good way to brick the controller.
 
 ## Pairing gotchas
 
