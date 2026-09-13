@@ -76,6 +76,20 @@ and holds, a small push hops to the next one (handy for the window traffic
 lights or menus), and a push into empty space pulls free. It only acts on
 controller-driven movement, so your trackpad and mouse behave normally.
 
+**Battery care.** The controller runs on two AAA batteries and can't fall asleep by
+itself while an app keeps it awake, so GearVR Remote sleeps it for you: after a few
+idle minutes (Settings → Pointer, five by default), and immediately when your Mac
+sleeps or locks. Press **Home** to wake it; the app reconnects on its own. Pausing
+with "Control this Mac" switches the sensors off but keeps the connection, and the
+fast 68 packets/s stream is only used when the air-mouse is on — buttons and
+scrolling get the slower, lighter 30 packets/s mode. A slow red flash on the
+controller means the batteries need replacing.
+
+**If you can't see the menu bar icon:** on Macs with a notch, a full menu bar can
+leave the icon in the gap behind it. The app notices and tells you. Hold ⌘ and drag
+menu bar icons to rearrange them, or turn on **Always show in the Dock** in
+Settings → General.
+
 **Audio.** The volume buttons send the same media keys as a keyboard's volume
 keys, so macOS shows its usual volume HUD; holding a button repeats it. For finer
 control, set the touchpad to **Volume** mode (in the menu or Settings → Touchpad)

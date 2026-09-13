@@ -22,14 +22,20 @@ final class AppModel: ObservableObject {
     @Published private(set) var clutched = false
     @Published private(set) var live = LiveState()
     @Published private(set) var calibration = GyroBias.Calibration.idle
+    /// The menu-bar icon is invisible (behind the notch on a full menu bar).
+    @Published private(set) var menuBarIconHidden = false
     @Published var enabled = true {
         didSet {
             if !enabled { mapper.reset() }
             updateMagnet()
+            updatePower()
         }
     }
     @Published var pointerOn: Bool {
-        didSet { mapper.pointerOn = pointerOn }
+        didSet {
+            mapper.pointerOn = pointerOn
+            updatePower()
+        }
     }
     @Published var config: RemoteConfig {
         didSet {
@@ -67,6 +73,8 @@ final class AppModel: ObservableObject {
     private var packets = 0
     private var packetRate = 0.0
     private var timers: [Timer] = []
+    private var lastActivity = ProcessInfo.processInfo.systemUptime
+    private var macAsleep = false
     private static let configKey = "config.v1"
 
     init() {
@@ -128,6 +136,26 @@ final class AppModel: ObservableObject {
             UserDefaults.standard.set(true, forKey: Self.welcomedKey)
             presentSettings(.welcome)
         }
+        // battery care: the controller can't sleep by itself while we hold it awake with
+        // keep-alives, so sleep it when the Mac does and when nothing has happened for a while
+        let workspace = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.willSleepNotification, NSWorkspace.screensDidSleepNotification,
+                     NSWorkspace.sessionDidResignActiveNotification] {
+            workspace.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                self?.macAsleep = true
+                self?.updatePower()
+            }
+        }
+        for name in [NSWorkspace.didWakeNotification, NSWorkspace.screensDidWakeNotification,
+                     NSWorkspace.sessionDidBecomeActiveNotification] {
+            workspace.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                self?.macAsleep = false
+                self?.noteActivity()
+            }
+        }
+
+        // the status item needs a moment to be placed before we can tell where it landed
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in self?.checkMenuBarIcon() }
         timers.append(Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.tick() })
         timers.append(Timer.scheduledTimer(withTimeInterval: 1.0 / 15, repeats: true) { [weak self] _ in
             if self?.liveVisible == true { self?.publishLive() }
@@ -163,6 +191,9 @@ final class AppModel: ObservableObject {
         packets += 1
         if battery != p.battery { battery = p.battery }
         if enabled { mapper.handle(p) }
+        // any button, touch or real movement counts as being in use
+        let moving = p.samples.contains { simd_length($0.gyro - mapper.bias.bias) > 6 }
+        if !p.buttons.isEmpty || p.touch.touching || moving { noteActivity() }
         if training.isRecording && mapper.bias.calibrated {
             // raw hand motion for the training's tremor measurement
             let b = mapper.bias.bias
@@ -171,7 +202,28 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Wake the controller and restart the idle countdown.
+    func noteActivity() {
+        lastActivity = ProcessInfo.processInfo.systemUptime
+        if link.isAsleep { return } // it wakes on its own advertisement, nothing to do here
+        updatePower()
+    }
+
+    /// Decides how hard the controller should be working right now.
+    private func updatePower() {
+        link.wantsHighRate = pointerOn && enabled
+        guard !link.isAsleep else { return }
+        let idleFor = ProcessInfo.processInfo.systemUptime - lastActivity
+        let limit = config.sleepAfterMinutes * 60
+        if macAsleep || (limit > 0 && idleFor > limit) {
+            link.sleepNow()
+        } else {
+            link.setLowPower(!enabled)
+        }
+    }
+
     private func tick() {
+        updatePower()
         packetRate = Double(packets)
         packets = 0
         let trusted = AXIsProcessTrusted()
@@ -201,6 +253,17 @@ final class AppModel: ObservableObject {
     }
 
     func resetConfig() { config = RemoteConfig() }
+
+    /// Warn once if the icon landed somewhere invisible, otherwise the app looks like it
+    /// never launched.
+    private func checkMenuBarIcon() {
+        let hidden = MenuBarVisibility.iconIsHidden()
+        if hidden != menuBarIconHidden { menuBarIconHidden = hidden }
+        log("menu bar icon hidden: \(hidden)")
+        guard hidden, !UserDefaults.standard.bool(forKey: "warnedMenuBarHidden") else { return }
+        UserDefaults.standard.set(true, forKey: "warnedMenuBarHidden")
+        presentSettings(.welcome)
+    }
 
     func showTraining() { training.show(model: self) }
 
@@ -254,6 +317,8 @@ final class AppModel: ObservableObject {
         case .searching: return "Searching — press Home to wake the controller"
         case .connecting: return "Connecting…"
         case .handshaking: return "Starting sensors…"
+        case .lowPower: return "Connected · paused, sensors off"
+        case .asleep: return "Asleep to save batteries — press Home to wake it"
         case .streaming:
             if case .collecting = calibration { return "Recalibrating — keep it still" }
             if !enabled { return "Connected · paused" }

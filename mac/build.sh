@@ -12,7 +12,7 @@ cd "$(dirname "$0")"
 NAME="GearVR Remote"
 EXE="GearVRRemote"
 BUNDLE_ID="com.dennisonbertram.gearvr-remote"
-VERSION="${VERSION:-1.6.0}"
+VERSION="${VERSION:-1.7.0}"
 MIN_OS="14.0"
 # Spotlight skips directories ending in .noindex, so the build output never shows up
 # alongside the installed app when you search for it.

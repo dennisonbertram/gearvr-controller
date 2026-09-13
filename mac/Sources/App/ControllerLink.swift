@@ -5,7 +5,7 @@ import Foundation
 
 final class ControllerLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     enum State: Equatable {
-        case bluetoothOff, unauthorized, searching, connecting, handshaking, streaming
+        case bluetoothOff, unauthorized, searching, connecting, handshaking, streaming, lowPower, asleep
     }
 
     var onState: ((State) -> Void)?
@@ -14,6 +14,11 @@ final class ControllerLink: NSObject, CBCentralManagerDelegate, CBPeripheralDele
     var log: ((String) -> Void)?
     /// Send `0000` (sensors off) when disconnecting, to save the controller's battery.
     var turnOffOnDisconnect = true
+    /// High rate (~68 pkt/s) for pointing; the plain sensor stream (~30 pkt/s) is enough
+    /// for buttons and scrolling and asks less of the controller's batteries.
+    var wantsHighRate = true {
+        didSet { if wantsHighRate != oldValue, state == .streaming { beginHandshake() } }
+    }
 
     private(set) var state = State.searching { didSet { if state != oldValue { onState?(state) } } }
     private(set) var deviceName: String?
@@ -101,9 +106,15 @@ final class ControllerLink: NSObject, CBCentralManagerDelegate, CBPeripheralDele
 
     func centralManager(_ c: CBCentralManager, didDisconnectPeripheral p: CBPeripheral, error: Error?) {
         log?("disconnected: \(error?.localizedDescription ?? "-")")
+        let sleeping = state == .asleep
         teardown()
         onDisconnect?()
-        retryLater()
+        if sleeping {
+            state = .asleep
+            central.connect(p, options: nil) // wake on the next advertisement
+        } else {
+            retryLater()
+        }
     }
 
     private func retryLater() {
@@ -149,7 +160,14 @@ final class ControllerLink: NSObject, CBCentralManagerDelegate, CBPeripheralDele
     }
 
     /// 0800 (VR mode, ~1.5 s to ack) -> wait for the 2-byte echo -> 0100 (start streaming).
+    /// Without the VR-mode step the controller streams at the slower sensor rate.
     private func beginHandshake() {
+        guard wantsHighRate else {
+            // VR mode sticks until the sensors are switched off, so drop it first
+            send(.off)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in self?.startStream() }
+            return
+        }
         state = .handshaking
         awaitingAck = true
         send(.vrMode)
@@ -194,6 +212,41 @@ final class ControllerLink: NSObject, CBCentralManagerDelegate, CBPeripheralDele
             onPacket?(packet)
         }
     }
+
+    // MARK: power
+
+    /// Sensors off but still connected: resuming is instant (no handshake).
+    func setLowPower(_ on: Bool) {
+        guard peripheral != nil, cmdChar != nil else { return }
+        if on {
+            guard state == .streaming else { return }
+            keepAlive?.invalidate()
+            watchdog?.invalidate()
+            send(.off)
+            state = .lowPower
+            log?("low power mode")
+        } else {
+            guard state == .lowPower else { return }
+            beginHandshake()
+        }
+    }
+
+    /// Sensors off and disconnected, so the controller can fall asleep on its own.
+    /// A pending connect brings it back the moment it advertises again (press Home).
+    func sleepNow() {
+        guard let p = peripheral, state != .asleep else { return }
+        log?("putting the controller to sleep")
+        if cmdChar != nil { send(.off) }
+        teardown()
+        central.cancelPeripheralConnection(p)
+        state = .asleep
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self, self.state == .asleep, let p = self.peripheral else { return }
+            self.central.connect(p, options: nil) // completes when it wakes up
+        }
+    }
+
+    var isAsleep: Bool { state == .asleep }
 
     // MARK: shutdown
 

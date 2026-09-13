@@ -70,6 +70,9 @@ public struct RemoteConfig: Codable, Equatable {
     public var clickFreezeMS = 150.0
 
     // holding a button that types a key or a media key repeats it, like a keyboard
+    /// Minutes of no controller activity before it's put to sleep to save its batteries
+    /// (0 = never). Press Home to wake it again.
+    public var sleepAfterMinutes = 5.0
     /// Keep an icon in the Dock even when no window is open.
     public var alwaysShowInDock = false
     public var repeatWhileHeld = true
@@ -129,7 +132,7 @@ public struct RemoteConfig: Codable, Equatable {
         take(.clutchSound, &clutchSound); take(.gestures, &gestures)
         take(.magnetEnabled, &magnetEnabled); take(.magnetStrength, &magnetStrength)
         take(.smoothing, &smoothing)
-        take(.alwaysShowInDock, &alwaysShowInDock)
+        take(.alwaysShowInDock, &alwaysShowInDock); take(.sleepAfterMinutes, &sleepAfterMinutes)
         take(.repeatWhileHeld, &repeatWhileHeld); take(.repeatDelayMS, &repeatDelayMS)
         take(.repeatIntervalMS, &repeatIntervalMS)
         version = (try? c.decode(Int.self, forKey: .version)) ?? 1

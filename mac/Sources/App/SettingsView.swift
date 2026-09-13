@@ -44,6 +44,22 @@ struct WelcomeTab: View {
                 }
                 .padding(.vertical, 4)
             }
+            if model.menuBarIconHidden {
+                Section {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange).font(.title3)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("The menu bar icon is hidden").font(.headline)
+                            Text("Your menu bar is full, so macOS put GearVR Remote's icon behind the notch where it can't be seen. Hold ⌘ and drag menu bar icons to rearrange them, or keep a Dock icon instead.")
+                                .font(.callout).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Toggle("Always show in the Dock", isOn: $model.config.alwaysShowInDock)
+                                .toggleStyle(.switch).controlSize(.small)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
             Section("Setup") {
                 CheckRow(done: model.linkState != .unauthorized, title: "Bluetooth access",
                          detail: model.linkState == .unauthorized ? "Allow GearVR Remote under Privacy & Security → Bluetooth." : "Allowed")
@@ -147,6 +163,14 @@ struct PointerTab: View {
                 LabeledContent("Not sure what suits you?") {
                     Button("Start training…") { model.showTraining() }
                 }
+                Picker("Sleep the controller after", selection: $model.config.sleepAfterMinutes) {
+                    Text("1 minute").tag(1.0)
+                    Text("3 minutes").tag(3.0)
+                    Text("5 minutes").tag(5.0)
+                    Text("15 minutes").tag(15.0)
+                    Text("Never").tag(0.0)
+                }
+                .help("With nothing happening, the controller is put to sleep so its AAA batteries last. Press Home to wake it.")
                 LabeledContent("Pointer drifting on its own?") {
                     Button("Recalibrate gyro…") { model.showCalibration() }
                 }
