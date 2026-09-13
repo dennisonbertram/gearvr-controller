@@ -56,7 +56,8 @@ The defaults match `../config.toml`:
 | Touchpad click | right click |
 | Home | air-mouse on/off |
 | Back | Escape |
-| Volume ± | system volume |
+| Volume ± | system volume — hold to keep changing it |
+| Touchpad in Volume mode | slide up and down for smooth system volume |
 | Trigger + touch bottom of pad | **clutch:** freeze the cursor while you re-home your hand, release the trigger to resume |
 | Near a button | **magnetic buttons:** buttons are slightly sticky, so arm wobble doesn't knock the pointer off them |
 
@@ -70,6 +71,14 @@ middle and it becomes a true magnet: the pointer snaps onto the nearest button
 and holds, a small push hops to the next one (handy for the window traffic
 lights or menus), and a push into empty space pulls free. It only acts on
 controller-driven movement, so your trackpad and mouse behave normally.
+
+**Audio.** The volume buttons send the same media keys as a keyboard's volume
+keys, so macOS shows its usual volume HUD; holding a button repeats it. For finer
+control, set the touchpad to **Volume** mode (in the menu or Settings → Touchpad)
+and slide your thumb up and down: that drives the output device's volume directly,
+in smooth steps rather than sixteenths, with its own on-screen level indicator.
+Any button can also be mapped to play/pause, next, previous, mute or brightness in
+Settings → Buttons.
 
 **Smoothing** (Settings → Pointer, 30% by default) evens out small wobbles. It
 adapts to speed: slow, careful movements are steadied, and fast moves come through

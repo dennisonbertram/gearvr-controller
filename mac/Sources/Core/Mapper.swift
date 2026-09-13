@@ -11,6 +11,8 @@ public protocol InputSink: AnyObject {
     func media(_ name: String, down: Bool)
     func shell(_ command: String)
     func sound(_ name: String)
+    /// Change the system output volume by `delta` of full scale (+ louder).
+    func adjustVolume(by delta: Double)
     func releaseAll()
 }
 
@@ -163,6 +165,7 @@ public final class InputMapper {
     private var smoothingAmount = -1.0
     private var pending: SIMD2<Double>? // deferred clutch-button press: buffered pointer motion
     private var suppressed: Set<ControllerButton> = [] // pressed during the clutch: ignored until released
+    private var repeating: (button: ControllerButton, action: Action, since: TimeInterval, last: TimeInterval)?
 
     static let swipeMaxS = 0.45
     static let swipeMinDist = 70
@@ -178,6 +181,7 @@ public final class InputMapper {
     public func handle(_ p: Packet) {
         checkClutch(p.touch)
         handleButtons(p)
+        repeatHeldAction()
         handleMotion(p)
         handleTouch(p)
     }
@@ -187,6 +191,7 @@ public final class InputMapper {
         pending = nil
         if clutched { clutched = false; onClutch?(false) }
         suppressed.removeAll()
+        repeating = nil
         prevButtons = []
         lastTimestamp = nil
         touchPrev = nil
@@ -215,6 +220,24 @@ public final class InputMapper {
     private func tap(_ action: Action) {
         run(action, down: true)
         run(action, down: false)
+    }
+
+    /// Typing actions (keys, media keys) repeat while the button is held, like a keyboard,
+    /// so holding volume down keeps turning it down.
+    private static func repeats(_ action: Action) -> Bool {
+        switch action {
+        case .key, .media: return true
+        default: return false
+        }
+    }
+
+    private func repeatHeldAction() {
+        guard config.repeatWhileHeld, let r = repeating else { return }
+        let t = now()
+        guard t - r.since >= config.repeatDelayMS / 1000,
+              t - r.last >= config.repeatIntervalMS / 1000 else { return }
+        repeating?.last = t
+        tap(r.action)
     }
 
     // MARK: clutch / deferred press
@@ -291,7 +314,13 @@ public final class InputMapper {
             } else if !isDown && suppressed.contains(name) {
                 suppressed.remove(name)
             } else {
-                run(config.action(for: name), down: isDown)
+                let action = config.action(for: name)
+                run(action, down: isDown)
+                if isDown, Self.repeats(action) {
+                    repeating = (name, action, now(), now())
+                } else if !isDown, repeating?.button == name {
+                    repeating = nil
+                }
             }
         }
         prevButtons = p.buttons
@@ -366,6 +395,9 @@ public final class InputMapper {
                         sink.scroll(dy: step)
                         scrollFrac -= Double(step)
                     }
+                case .volume:
+                    // sliding up the pad (y decreasing) turns it up; a full sweep is ~80%
+                    sink.adjustVolume(by: -dy * 0.8 / GearVR.touchMax)
                 case .gestures, .off:
                     break
                 }

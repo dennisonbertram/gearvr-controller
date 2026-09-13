@@ -64,6 +64,7 @@ final class EventSink: InputSink {
     private var lastControllerMove = -Double.infinity
     private var bounds = CGRect.zero
     private var lastClick: (button: MouseButton, time: TimeInterval, count: Int64)?
+    private let hud = MainActor.assumeIsolated { VolumeHUD() }
 
     init() {
         refreshBounds()
@@ -214,6 +215,18 @@ final class EventSink: InputSink {
 
     func sound(_ name: String) {
         NSSound(named: NSSound.Name(name))?.play()
+    }
+
+    /// Continuous volume from the touchpad. Media keys move in sixteenths, so this goes
+    /// straight to the output device and shows its own level indicator.
+    func adjustVolume(by delta: Double) {
+        guard let current = SystemAudio.volume else { return }
+        let level = min(max(current + delta, 0), 1)
+        guard abs(level - current) > 0.0005 else { return }
+        log?(String(format: "volume %.0f%%", level * 100))
+        guard postEvents else { return }
+        SystemAudio.setVolume(level)
+        MainActor.assumeIsolated { hud.show(level: level) }
     }
 
     func releaseAll() {

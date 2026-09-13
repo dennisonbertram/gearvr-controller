@@ -195,6 +195,7 @@ extension TouchMode {
         case .scroll: return "Scroll"
         case .cursor: return "Cursor"
         case .gestures: return "Swipes"
+        case .volume: return "Volume"
         case .off: return "Off"
         }
     }

@@ -174,6 +174,13 @@ struct TouchpadTab: View {
                 SliderRow(title: "Scroll speed", value: $model.config.scrollSpeed, range: 0.1...2, format: "%.1f×")
                 Toggle("Invert scrolling", isOn: $model.config.invertScroll)
             }
+            Section {
+                Toggle("Holding a button repeats it", isOn: $model.config.repeatWhileHeld)
+                    .help("Keys and media keys repeat while you hold the button, like a keyboard, so holding volume down keeps lowering it.")
+            } footer: {
+                Text("Touchpad modes: Scroll, Cursor (trackpad-style pointer), Swipes (quick flicks run the actions below), Volume (slide up and down for the system volume), or Off.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Swipes (in Swipes mode)") {
                 ForEach([("swipe_left", "Swipe left"), ("swipe_right", "Swipe right"), ("swipe_up", "Swipe up"),
                          ("swipe_down", "Swipe down"), ("tap", "Tap")], id: \.0) { key, title in

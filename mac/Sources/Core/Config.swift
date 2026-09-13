@@ -45,7 +45,7 @@ public enum Action: Equatable {
 }
 
 public enum TouchMode: String, Codable, CaseIterable {
-    case scroll, cursor, gestures, off
+    case scroll, cursor, gestures, volume, off
 }
 
 public enum ClutchZone: String, Codable, CaseIterable {
@@ -68,6 +68,11 @@ public struct RemoteConfig: Codable, Equatable {
     public var smoothing = 0.3 // 0 off ... 1 strong (adaptive: steadier when slow, quick when fast)
     public var deadzoneDPS = 1.2
     public var clickFreezeMS = 150.0
+
+    // holding a button that types a key or a media key repeats it, like a keyboard
+    public var repeatWhileHeld = true
+    public var repeatDelayMS = 350.0
+    public var repeatIntervalMS = 90.0
 
     // touchpad
     public var touchModePointerOn = TouchMode.scroll
@@ -122,6 +127,8 @@ public struct RemoteConfig: Codable, Equatable {
         take(.clutchSound, &clutchSound); take(.gestures, &gestures)
         take(.magnetEnabled, &magnetEnabled); take(.magnetStrength, &magnetStrength)
         take(.smoothing, &smoothing)
+        take(.repeatWhileHeld, &repeatWhileHeld); take(.repeatDelayMS, &repeatDelayMS)
+        take(.repeatIntervalMS, &repeatIntervalMS)
         version = (try? c.decode(Int.self, forKey: .version)) ?? 1
     }
 

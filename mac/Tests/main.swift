@@ -105,6 +105,7 @@ final class FakeSink: InputSink {
     func media(_ name: String, down: Bool) { events.append("media \(name) \(down)") }
     func shell(_ command: String) { events.append("shell") }
     func sound(_ name: String) { events.append("sound \(name)") }
+    func adjustVolume(by delta: Double) { events.append(String(format: "volume %+.3f", delta)) }
     func releaseAll() {}
     var nonMoves: [String] { events.filter { $0 != "move" } }
 }
@@ -233,6 +234,7 @@ test("yaw left moves the cursor left, pitch up moves it up") {
         func media(_ name: String, down: Bool) {}
         func shell(_ command: String) {}
         func sound(_ name: String) {}
+        func adjustVolume(by delta: Double) {}
         func releaseAll() {}
     }
     let sink = MoveSink()
@@ -281,6 +283,7 @@ test("smoothing: applied by the mapper, and fully bypassed at 0") {
         func media(_ name: String, down: Bool) {}
         func shell(_ command: String) {}
         func sound(_ name: String) {}
+        func adjustVolume(by delta: Double) {}
         func releaseAll() {}
     }
     func run(_ smoothing: Double) -> (first: Double, total: Double) {
@@ -350,6 +353,48 @@ test("gyro bias calibrates when still") {
     let b = GyroBias()
     for _ in 0..<100 { b.update(SIMD3(-1.1, -4.5, 1.8)) }
     check(b.calibrated && simd_length(b.bias - SIMD3(-1.1, -4.5, 1.8)) < 1e-9, "\(b.bias)")
+}
+
+test("volume: holding a media button repeats it like a keyboard") {
+    var clock = 0.0
+    let sink = FakeSink()
+    var cfg = RemoteConfig()
+    cfg.clickFreezeMS = 0
+    cfg.smoothing = 0
+    cfg.repeatDelayMS = 300
+    cfg.repeatIntervalMS = 100
+    let m = InputMapper(config: cfg, sink: sink, now: { clock })
+    m.bias.calibrated = true
+    var t: UInt32 = 0
+    func feed(_ buttons: Set<ControllerButton>, seconds: Double) {
+        let steps = Int(seconds / 0.0147)
+        for _ in 0..<steps {
+            clock += 0.0147
+            let samples = (0..<3).map { _ -> IMUSample in t &+= 4850; return IMUSample(timestampUS: t, accel: SIMD3(0, 0, 1), gyro: .zero) }
+            m.handle(Packet(samples: samples, touch: .none, buttons: buttons))
+        }
+    }
+    feed([], seconds: 0.1)
+    feed([.volumeDown], seconds: 0.2) // still inside the initial delay
+    let early = sink.events.filter { $0.hasPrefix("media") }.count
+    check(early == 1, "one press, no repeat yet: \(early / 2) presses")
+    feed([.volumeDown], seconds: 1.0) // held for another second: ~10 repeats
+    let held = sink.events.filter { $0 == "media volume_down true" }.count
+    check(held >= 8 && held <= 13, "repeats about every 100 ms: \(held)")
+    feed([], seconds: 0.3)
+    let after = sink.events.filter { $0 == "media volume_down true" }.count
+    check(after == held, "stops on release")
+}
+
+test("volume: touchpad volume mode slides the system volume") {
+    let r = Rig { $0.touchModePointerOn = .volume }
+    r.feed(touch: touchAt(150, 200))
+    r.feed(touch: touchAt(150, 100)) // thumb slides up the pad
+    let ups = r.sink.events.filter { $0.hasPrefix("volume +") }
+    check(ups.count == 1, "one change: \(r.sink.events)")
+    check(ups.first == "volume +0.254", "a third of the pad is about a quarter of full scale: \(ups)")
+    r.feed(touch: touchAt(150, 260)) // and back down
+    check(r.sink.events.last?.hasPrefix("volume -") == true, "down lowers it: \(r.sink.events.last ?? "-")")
 }
 
 test("scroll mode scrolls, gestures mode swipes") {
