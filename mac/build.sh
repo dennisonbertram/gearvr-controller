@@ -1,11 +1,11 @@
 #!/bin/bash
 # Builds "GearVR Remote.app" with plain swiftc (Command Line Tools are enough; no Xcode project).
 #
-#   ./build.sh           build build/GearVR Remote.app (universal arm64 + x86_64)
+#   ./build.sh           build $BUILD/GearVR Remote.app (universal arm64 + x86_64)
 #   ./build.sh test      run the core tests against recorded controller packets
 #   ./build.sh install   build, then copy the app to /Applications and launch it
-#   ./build.sh run       build, then launch from build/
-#   ./build.sh dist      build, then package build/GearVR-Remote-<version>.dmg for distribution
+#   ./build.sh run       build, then launch from $BUILD/
+#   ./build.sh dist      build, then package $BUILD/GearVR-Remote-<version>.dmg for distribution
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -14,13 +14,16 @@ EXE="GearVRRemote"
 BUNDLE_ID="com.dennisonbertram.gearvr-remote"
 VERSION="${VERSION:-1.6.0}"
 MIN_OS="14.0"
-APP="build/$NAME.app"
+# Spotlight skips directories ending in .noindex, so the build output never shows up
+# alongside the installed app when you search for it.
+BUILD="build.noindex"
+APP="$BUILD/$NAME.app"
 FLAGS=(-swift-version 5 -O)
 
 run_tests() {
-    mkdir -p build
-    swiftc "${FLAGS[@]}" Sources/Core/*.swift Tests/main.swift -o build/core-tests
-    build/core-tests ../tests_fixtures.json
+    mkdir -p "$BUILD"
+    swiftc "${FLAGS[@]}" Sources/Core/*.swift Tests/main.swift -o $BUILD/core-tests
+    $BUILD/core-tests ../tests_fixtures.json
 }
 
 # macOS ties Accessibility permission to the code signature. Ad-hoc signatures change
@@ -34,25 +37,25 @@ signing_identity() {
 }
 
 make_icon() {
-    swiftc -O tools/make_icon.swift -o build/make_icon
-    rm -rf build/AppIcon.iconset
-    build/make_icon build/AppIcon.iconset
-    iconutil -c icns build/AppIcon.iconset -o build/AppIcon.icns
+    swiftc -O tools/make_icon.swift -o $BUILD/make_icon
+    rm -rf $BUILD/AppIcon.iconset
+    $BUILD/make_icon $BUILD/AppIcon.iconset
+    iconutil -c icns $BUILD/AppIcon.iconset -o $BUILD/AppIcon.icns
 }
 
 build_app() {
-    mkdir -p build
+    mkdir -p "$BUILD"
     for arch in arm64 x86_64; do
         echo "compiling ${arch}..."
         swiftc "${FLAGS[@]}" -parse-as-library -target "$arch-apple-macos$MIN_OS" \
-            Sources/Core/*.swift Sources/App/*.swift -o "build/$EXE-$arch"
+            Sources/Core/*.swift Sources/App/*.swift -o "$BUILD/$EXE-$arch"
     done
-    [ build/AppIcon.icns -nt tools/make_icon.swift ] || make_icon
+    [ $BUILD/AppIcon.icns -nt tools/make_icon.swift ] || make_icon
 
     rm -rf "$APP"
     mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-    lipo -create "build/$EXE-arm64" "build/$EXE-x86_64" -output "$APP/Contents/MacOS/$EXE"
-    cp build/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+    lipo -create "$BUILD/$EXE-arm64" "$BUILD/$EXE-x86_64" -output "$APP/Contents/MacOS/$EXE"
+    cp $BUILD/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
     cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -80,7 +83,7 @@ PLIST
 }
 
 make_dmg() {
-    local stage="build/dmg" dmg="build/GearVR-Remote-$VERSION.dmg"
+    local stage="$BUILD/dmg" dmg="$BUILD/GearVR-Remote-$VERSION.dmg"
     rm -rf "$stage" "$dmg"
     mkdir -p "$stage"
     cp -R "$APP" "$stage/"

@@ -113,11 +113,11 @@ You can also turn on launch at login there.
 
 | Command | What it does |
 |---|---|
-| `./build.sh` | build `build/GearVR Remote.app` |
+| `./build.sh` | build `build.noindex/GearVR Remote.app` (a `.noindex` folder so Spotlight doesn't list the build next to the installed app) |
 | `./build.sh run` | build and launch |
 | `./build.sh dist` | build and package a drag-to-install DMG |
 | `./build.sh test` | run the core tests against packets recorded from a real controller |
-| `build/GearVR Remote.app/Contents/MacOS/GearVRRemote --dry-run --verbose` | connect and decode, but log actions instead of moving the mouse |
+| `build.noindex/GearVR Remote.app/Contents/MacOS/GearVRRemote --dry-run --verbose` | connect and decode, but log actions instead of moving the mouse |
 
 Layout:
 
