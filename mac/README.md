@@ -29,10 +29,14 @@ opens a Welcome window with a live setup checklist:
 3. Press **Home** on the controller to wake it. The menu-bar glyph fills in
    once it's connected. Set the controller down for a second so the gyro can calibrate.
 
-It's a menu-bar app, so there's no Dock icon. To bring back the Welcome and
-Settings window, open *GearVR Remote* again from Spotlight, Launchpad, or
-Applications while it's running. Turn on **Start when you log in** to have it
-start automatically; it then appears under System Settings → General → Login Items.
+It installs to **/Applications**, so Spotlight, Launchpad and Finder all find it —
+search for "GearVR". It's a menu-bar app: normally there's no Dock icon, just the
+controller glyph at the top right. A Dock icon appears whenever one of its windows
+is open, and opening *GearVR Remote* again while it's running brings the Welcome
+and Settings window back. If you'd rather keep it in the Dock permanently, turn on
+**Always show in the Dock** in Settings → General; you can then drag it to your
+Dock and launch it like any other app. **Start when you log in** is in the same
+place, and puts it under System Settings → General → Login Items.
 
 macOS ties these permissions to the app's code signature. An ad-hoc signed app
 gets a new signature every build, so after rebuilding, the Accessibility switch

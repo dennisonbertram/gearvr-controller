@@ -37,9 +37,11 @@ private struct MenuBarLabel: View {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let model = AppModel()
+    private var dock: DockPresence?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         model.start()
+        dock = DockPresence(model: model)
         if let dir = Snapshot.directory { Snapshot.run(model: model, into: dir) }
     }
 

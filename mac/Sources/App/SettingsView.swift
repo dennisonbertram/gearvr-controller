@@ -226,6 +226,8 @@ struct GeneralTab: View {
         Form {
             Section {
                 Toggle("Launch at login", isOn: Binding(get: { model.launchAtLogin }, set: { model.setLaunchAtLogin($0) }))
+                Toggle("Always show in the Dock", isOn: $model.config.alwaysShowInDock)
+                    .help("GearVR Remote lives in the menu bar. Turn this on to keep a Dock icon as well, so you can launch and reopen it like any other app.")
                 LabeledContent("Accessibility") {
                     if model.accessibilityTrusted {
                         Label("Allowed", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
