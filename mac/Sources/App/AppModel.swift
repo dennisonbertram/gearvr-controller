@@ -79,6 +79,7 @@ final class AppModel: ObservableObject {
     private var packetRate = 0.0
     private var timers: [Timer] = []
     private var lastActivity = ProcessInfo.processInfo.systemUptime
+    private var movingPackets = 0 // consecutive packets with real hand motion
     private var macAsleep = false // the Mac or its display is asleep
     private var screenLocked = false // locked, or switched to another user
     private var macAway: Bool { macAsleep || screenLocked }
@@ -220,15 +221,24 @@ final class AppModel: ObservableObject {
         packets += 1
         if battery != p.battery { battery = p.battery }
         if enabled { mapper.handle(p) }
-        // any button, touch or real movement counts as being in use
-        let moving = p.samples.contains { simd_length($0.gyro - mapper.bias.bias) > 6 }
-        if !p.buttons.isEmpty || p.touch.touching || moving { noteActivity() }
+        // any button, touch or real movement counts as being in use. A controller lying still
+        // throws single-sample gyro spikes of up to ~10°/s, so movement has to last a few packets
+        // (~45 ms), or it would never fall asleep on the table.
+        let rates = p.samples.map { simd_length($0.gyro - mapper.bias.bias) }.sorted()
+        movingPackets = rates[rates.count / 2] > 6 ? movingPackets + 1 : 0
+        if !p.buttons.isEmpty || p.touch.touching || movingPackets >= 3 { noteActivity() }
         if training.isRecording && mapper.bias.calibrated {
             // raw hand motion for the training's tremor measurement
             let b = mapper.bias.bias
             let mean = p.samples.map { simd_length($0.gyro - b) }.reduce(0, +) / Double(p.samples.count)
             training.session.recordTremor(mean)
         }
+    }
+
+    /// The menu's Wake button: works even before the controller has powered down.
+    func wakeController() {
+        lastActivity = ProcessInfo.processInfo.systemUptime
+        link.wake()
     }
 
     /// Wake the controller and restart the idle countdown.
@@ -242,7 +252,7 @@ final class AppModel: ObservableObject {
     private func macAwayChanged() {
         log("mac \(macAsleep ? "asleep" : "awake"), \(screenLocked ? "locked" : "unlocked")")
         link.wakeOnHome = !macAway
-        if macAway { updatePower() } else { noteActivity() }
+        if macAway { updatePower() } else { link.wake(); noteActivity() } // back at the Mac: pick it up again
     }
 
     /// Decides how hard the controller should be working right now.
@@ -380,7 +390,7 @@ final class AppModel: ObservableObject {
         case .connecting: return "Connecting…"
         case .handshaking: return "Starting sensors…"
         case .lowPower: return "Connected · paused, sensors off"
-        case .asleep: return "Asleep to save batteries — press Home to wake it"
+        case .asleep: return "Asleep to save batteries — press Home or Wake"
         case .streaming:
             if case .collecting = calibration { return "Recalibrating — keep it still" }
             if !enabled { return "Connected · paused" }

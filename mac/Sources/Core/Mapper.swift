@@ -13,6 +13,8 @@ public protocol InputSink: AnyObject {
     func sound(_ name: String)
     /// Change the system output volume by `delta` of full scale (+ louder).
     func adjustVolume(by delta: Double)
+    /// Put the pointer in the middle of the main display.
+    func recenter()
     func releaseAll()
 }
 
@@ -179,10 +181,16 @@ public final class InputMapper {
     private var suppressed: Set<ControllerButton> = [] // pressed during the clutch: ignored until released
     private var repeating: (button: ControllerButton, action: Action, since: TimeInterval, last: TimeInterval)?
     private var heldKeys: [Action] = [] // keys and media keys that are down: released on reset
+    private var triggerDownAt: TimeInterval = 0
+    private var lastTriggerTap = -Double.infinity
+    private var secondPress: (since: TimeInterval, moved: SIMD2<Double>)? // held back: double-click or recenter?
+    private var recentered = false // the trigger's release belongs to the recenter gesture
 
     static let swipeMaxS = 0.45
     static let swipeMinDist = 70
     static let tapMaxDist = 20
+    static let doubleTapS = 0.4
+    static let recenterHoldS = 0.5
 
     public init(config: RemoteConfig, sink: InputSink, now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
         self.config = config
@@ -195,6 +203,7 @@ public final class InputMapper {
         touch = p.touch
         handleButtons(p)
         checkClutch(p.touch)
+        checkRecenter()
         repeatHeldAction()
         handleMotion(p)
         handleTouch(p)
@@ -214,6 +223,9 @@ public final class InputMapper {
         touchPrev = nil
         touchStart = nil
         touchClicked = false
+        secondPress = nil
+        recentered = false
+        lastTriggerTap = -.infinity
         smoothYaw.reset()
         smoothPitch.reset()
     }
@@ -313,6 +325,13 @@ public final class InputMapper {
     private func pointerMove(_ dx: Double, _ dy: Double) {
         if clutched || (dx == 0 && dy == 0) { return }
         var d = SIMD2(dx, dy)
+        if var s = secondPress {
+            s.moved += d
+            if simd_length(s.moved) < config.dragThresholdPX { secondPress = s; return }
+            secondPress = nil // moved: a double-click-drag after all (e.g. selecting words)
+            press(.trigger, down: true)
+            d = s.moved
+        }
         if var buffered = pending {
             buffered += d
             if simd_length(buffered) < config.dragThresholdPX {
@@ -336,23 +355,61 @@ public final class InputMapper {
             if was == isDown { continue }
             if isDown { freezeUntil = now() + config.clickFreezeMS / 1000 }
             if isDown && name == .touchpad && p.touch.touching { touchClicked = true }
-            if name == config.clutchButton {
-                clutchButton(down: isDown)
-            } else if isDown && clutched {
-                suppressed.insert(name)
-            } else if !isDown && suppressed.contains(name) {
-                suppressed.remove(name)
-            } else {
-                let action = config.action(for: name)
-                run(action, down: isDown)
-                if isDown, Self.repeats(action) {
-                    repeating = (name, action, now(), now())
-                } else if !isDown, repeating?.button == name {
-                    repeating = nil
-                }
-            }
+            if name == .trigger && config.recenterGesture && interceptTrigger(down: isDown) { continue }
+            press(name, down: isDown)
         }
         prevButtons = p.buttons
+    }
+
+    private func press(_ name: ControllerButton, down isDown: Bool) {
+        if name == config.clutchButton {
+            clutchButton(down: isDown)
+        } else if isDown && clutched {
+            suppressed.insert(name)
+        } else if !isDown && suppressed.contains(name) {
+            suppressed.remove(name)
+        } else {
+            let action = config.action(for: name)
+            run(action, down: isDown)
+            if isDown, Self.repeats(action) {
+                repeating = (name, action, now(), now())
+            } else if !isDown, repeating?.button == name {
+                repeating = nil
+            }
+        }
+    }
+
+    // MARK: recenter (double-click the trigger, hold the second click)
+
+    /// Holds back the second press of a double-click until it's clear whether it's a click,
+    /// a drag, or a hold that recenters. Returns true when the event was taken.
+    private func interceptTrigger(down: Bool) -> Bool {
+        let t = now()
+        if down {
+            triggerDownAt = t
+            guard !clutched, t - lastTriggerTap < Self.doubleTapS else { return false }
+            lastTriggerTap = -.infinity
+            secondPress = (t, .zero)
+            return true
+        }
+        if recentered { recentered = false; return true }
+        if secondPress != nil { // let go quickly: an ordinary double-click
+            secondPress = nil
+            press(.trigger, down: true)
+            press(.trigger, down: false)
+            return true
+        }
+        lastTriggerTap = !clutched && t - triggerDownAt < Self.doubleTapS ? t : -.infinity
+        return false
+    }
+
+    private func checkRecenter() {
+        guard let s = secondPress, now() - s.since >= Self.recenterHoldS else { return }
+        secondPress = nil
+        recentered = true
+        smoothYaw.reset()
+        smoothPitch.reset()
+        sink.recenter()
     }
 
     // MARK: gyro air-mouse

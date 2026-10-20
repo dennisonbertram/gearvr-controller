@@ -183,6 +183,14 @@ final class EventSink: InputSink {
         }
     }
 
+    func recenter() {
+        let r = CGDisplayBounds(CGMainDisplayID())
+        guard !r.isEmpty else { return }
+        log?("recenter")
+        magnet.release()
+        moveCursor(to: CGPoint(x: r.midX, y: r.midY))
+    }
+
     /// Drives the magnet's glide and hold; call at a steady ~120 Hz.
     func magnetTick() {
         // only while the controller is the device steering the pointer

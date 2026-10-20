@@ -151,6 +151,7 @@ test("recorded pitch up moves the cursor up (gyro sign through the mapper)") {
         func shell(_ command: String) {}
         func sound(_ name: String) {}
         func adjustVolume(by delta: Double) {}
+        func recenter() {}
         func releaseAll() {}
     }
     let sink = DY()
@@ -184,12 +185,16 @@ final class FakeSink: InputSink {
     func shell(_ command: String) { events.append("shell") }
     func sound(_ name: String) { events.append("sound \(name)") }
     func adjustVolume(by delta: Double) { events.append(String(format: "volume %+.3f", delta)) }
+    func recenter() { events.append("recenter") }
     func releaseAll() {}
     var nonMoves: [String] { events.filter { $0 != "move" } }
 }
 
+final class Clock { var t = 0.0 }
+
 final class Rig {
     let sink = FakeSink()
+    let clock = Clock() // stays at 0 unless a test moves it
     let mapper: InputMapper
     var t: UInt32 = 1000
 
@@ -201,7 +206,8 @@ final class Rig {
         cfg.clutchSound = false
         cfg.smoothing = 0 // these tests check event logic; smoothing has its own test
         tweak(&cfg)
-        mapper = InputMapper(config: cfg, sink: sink, now: { 0 })
+        let clock = self.clock
+        mapper = InputMapper(config: cfg, sink: sink, now: { clock.t })
         mapper.bias.calibrated = true
     }
 
@@ -340,6 +346,56 @@ test("reset releases held keys and media keys") {
     check(r.sink.events.count == 4, "nothing held, nothing released: \(r.sink.events)")
 }
 
+test("recenter: a quick second click is an ordinary double-click") {
+    let r = Rig()
+    r.feed()
+    r.feed([.trigger], n: 2)
+    r.clock.t = 0.1; r.feed()
+    r.clock.t = 0.2; r.feed([.trigger], n: 2)
+    check(r.sink.nonMoves == ["left down", "left up"], "second press held back: \(r.sink.nonMoves)")
+    r.clock.t = 0.3; r.feed()
+    check(r.sink.nonMoves == ["left down", "left up", "left down", "left up"], "\(r.sink.nonMoves)")
+}
+
+test("recenter: double-click and hold the second click recenters without clicking") {
+    let r = Rig()
+    r.feed()
+    r.feed([.trigger])
+    r.clock.t = 0.1; r.feed()
+    r.clock.t = 0.2; r.feed([.trigger])
+    r.clock.t = 0.75; r.feed([.trigger], n: 3)
+    r.clock.t = 1.0; r.feed()
+    check(r.sink.nonMoves == ["left down", "left up", "recenter"], "\(r.sink.nonMoves)")
+}
+
+test("recenter: moving during the second press is a double-click-drag") {
+    let r = Rig()
+    r.feed()
+    r.feed([.trigger])
+    r.clock.t = 0.1; r.feed()
+    r.clock.t = 0.2; r.feed([.trigger], yaw: -60, n: 10)
+    r.clock.t = 0.4; r.feed()
+    check(r.sink.nonMoves == ["left down", "left up", "left down", "left up"], "\(r.sink.nonMoves)")
+    check(!r.sink.events.contains("recenter"), "no recenter")
+}
+
+test("recenter: a slow second click is just a click, and the setting turns it off") {
+    let r = Rig()
+    r.feed()
+    r.feed([.trigger])
+    r.clock.t = 0.1; r.feed()
+    r.clock.t = 0.8; r.feed([.trigger])
+    r.clock.t = 1.5; r.feed([.trigger]); r.feed()
+    check(r.sink.nonMoves == ["left down", "left up", "left down", "left up"], "plain click: \(r.sink.nonMoves)")
+    let off = Rig { $0.recenterGesture = false }
+    off.feed()
+    off.feed([.trigger])
+    off.clock.t = 0.1; off.feed()
+    off.clock.t = 0.2; off.feed([.trigger])
+    off.clock.t = 1.0; off.feed([.trigger]); off.feed()
+    check(off.sink.nonMoves == ["left down", "left up", "left down", "left up"], "\(off.sink.nonMoves)")
+}
+
 test("home toggles the air-mouse; no motion when off") {
     let r = Rig()
     var toggles: [Bool] = []
@@ -363,6 +419,7 @@ test("yaw left moves the cursor left, pitch up moves it up") {
         func shell(_ command: String) {}
         func sound(_ name: String) {}
         func adjustVolume(by delta: Double) {}
+        func recenter() {}
         func releaseAll() {}
     }
     let sink = MoveSink()
@@ -412,6 +469,7 @@ test("smoothing: applied by the mapper, and fully bypassed at 0") {
         func shell(_ command: String) {}
         func sound(_ name: String) {}
         func adjustVolume(by delta: Double) {}
+        func recenter() {}
         func releaseAll() {}
     }
     func run(_ smoothing: Double) -> (first: Double, total: Double) {
@@ -448,6 +506,7 @@ test("smoothing: restarts after the air-mouse was off, not from the old rate") {
         func shell(_ command: String) {}
         func sound(_ name: String) {}
         func adjustVolume(by delta: Double) {}
+        func recenter() {}
         func releaseAll() {}
     }
     let sink = Sum()

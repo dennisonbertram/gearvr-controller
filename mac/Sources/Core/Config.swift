@@ -68,6 +68,8 @@ public struct RemoteConfig: Codable, Equatable {
     public var smoothing = 0.3 // 0 off ... 1 strong (adaptive: steadier when slow, quick when fast)
     public var deadzoneDPS = 1.2
     public var clickFreezeMS = 150.0
+    /// Double-click the trigger and hold the second click to put the pointer back in the middle of the screen.
+    public var recenterGesture = true
 
     // holding a button that types a key or a media key repeats it, like a keyboard
     /// Minutes of no controller activity before it's put to sleep to save its batteries
@@ -134,7 +136,7 @@ public struct RemoteConfig: Codable, Equatable {
         take(.smoothing, &smoothing)
         take(.alwaysShowInDock, &alwaysShowInDock); take(.sleepAfterMinutes, &sleepAfterMinutes)
         take(.repeatWhileHeld, &repeatWhileHeld); take(.repeatDelayMS, &repeatDelayMS)
-        take(.repeatIntervalMS, &repeatIntervalMS)
+        take(.repeatIntervalMS, &repeatIntervalMS); take(.recenterGesture, &recenterGesture)
         version = (try? c.decode(Int.self, forKey: .version)) ?? 1
     }
 

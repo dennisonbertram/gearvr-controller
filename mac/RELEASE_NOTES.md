@@ -1,8 +1,14 @@
 ## What's new in 1.8.0
 
-* **Waking and sleeping:** pressing Home after the controller dozes off wakes it
-  properly instead of putting it back to sleep a second later. Locking the screen
-  now sleeps the controller, and a sleeping controller stays asleep.
+* **Recenter:** lost the pointer? Double-click the trigger and keep holding the
+  second click, and it jumps to the middle of the main screen. A quick double-click
+  is still a double-click. You can turn it off in Settings → Pointer.
+* **Battery care that works:** earlier versions never let the controller sleep. They
+  disconnected it, but macOS keeps its own link to the paired controller, so the app
+  reconnected and the stream started again. Now, after the idle time or when your Mac
+  sleeps or locks, the app switches the sensors off and goes quiet, and the controller
+  powers itself down about five minutes later. A controller lying still on the table
+  no longer counts as in use. Press Home, or Wake in the menu, to bring it back.
 * **Steadier pointer:** the gyro calibration is no longer thrown away every time
   the air-mouse turns on or the controller reconnects, the cursor no longer jumps
   after a click, a pause or a recalibration, and the magnet is calmer.

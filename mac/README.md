@@ -65,6 +65,7 @@ config.toml's 22, and smoothing, the magnet, and battery care exist only here.
 | Back | Escape |
 | Volume ± | system volume — hold to keep changing it |
 | Touchpad in Volume mode | slide up and down for smooth system volume |
+| Double-click the trigger, hold the second click | **recenter:** the pointer jumps to the middle of the main screen (turn it off in Settings → Pointer) |
 | Trigger + touch bottom of pad | **clutch:** freeze the cursor while you re-home your hand, release the trigger to resume |
 | Near a button | **magnetic buttons:** buttons are slightly sticky, so arm wobble doesn't knock the pointer off them |
 
@@ -79,10 +80,12 @@ and holds, a small push hops to the next one (handy for the window traffic
 lights or menus), and a push into empty space pulls free. It only acts on
 controller-driven movement, so your trackpad and mouse behave normally.
 
-**Battery care.** The controller runs on two AAA batteries and can't fall asleep by
-itself while an app keeps it awake, so GearVR Remote sleeps it for you: after a few
-idle minutes (Settings → Pointer, five by default), and immediately when your Mac
-sleeps or locks. Press **Home** to wake it; the app reconnects on its own. Pausing
+**Battery care.** The controller runs on two AAA batteries and stays awake as long
+as an app streams from it. So after a few idle minutes (Settings → Pointer, five by
+default), and as soon as your Mac sleeps or locks, GearVR Remote switches its sensors
+off and goes quiet; the controller then powers itself down about five minutes later.
+(Disconnecting doesn't work: macOS keeps its own link to the paired controller.)
+Press **Home**, or **Wake** in the menu, to bring it back; the app reconnects on its own. Pausing
 with "Control this Mac" switches the sensors off but keeps the connection, and the
 fast 68 packets/s stream is only used when the air-mouse is on — buttons and
 scrolling get the slower, lighter 30 packets/s mode. A slow red flash on the

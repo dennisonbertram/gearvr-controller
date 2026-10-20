@@ -78,6 +78,7 @@ struct WelcomeTab: View {
                          ("Trigger", "click · hold and move to drag"),
                          ("Touchpad", "slide to scroll · click to right-click"),
                          ("Home", "air mouse on/off"),
+                         ("Double-click trigger, hold", "pointer back to the middle of the screen"),
                          ("Trigger + touch bottom of pad", "freeze the pointer while you re-grip"),
                          ("Hover over a button", "it gets a little sticky, which steadies your aim"),
                          ("Back · Volume ±", "Escape · system volume")], id: \.0) { control, action in
@@ -149,6 +150,8 @@ struct PointerTab: View {
                     .help("Evens out small wobbles. It adapts to speed: steadier when you move slowly, quick when you move fast. 0% turns it off.")
                 SliderRow(title: "Dead zone", value: $model.config.deadzoneDPS, range: 0...5, format: "%.1f °/s")
                 SliderRow(title: "Click steadying", value: $model.config.clickFreezeMS, range: 0...400, format: "%.0f ms")
+                Toggle("Double-click and hold the trigger to recenter", isOn: $model.config.recenterGesture)
+                    .help("Lost the pointer? Double-click the trigger and keep holding the second click: the pointer jumps to the middle of the main screen.")
             }
             Section {
                 Toggle("Snap the pointer onto buttons", isOn: $model.config.magnetEnabled)
@@ -183,7 +186,7 @@ struct PointerTab: View {
             } header: {
                 Text("Battery care")
             } footer: {
-                Text("The controller can't fall asleep while it's connected, so GearVR Remote sleeps it after this long with nothing happening, and straight away when your Mac sleeps or locks. Press Home to wake it. Turning off Control this Mac switches its sensors off, and the fast 68 packets/s stream runs only while the air mouse is on (30 otherwise).")
+                Text("The controller stays awake while an app streams from it, so after this long with nothing happening, or as soon as your Mac sleeps or locks, GearVR Remote switches its sensors off and goes quiet. The controller then powers itself down about five minutes later. Press Home (or Wake in the menu) to bring it back. Turning off Control this Mac switches its sensors off, and the fast 68 packets/s stream runs only while the air mouse is on (30 otherwise).")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

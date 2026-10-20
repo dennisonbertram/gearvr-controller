@@ -79,6 +79,11 @@ struct MenuView: View {
             if let level = model.battery, model.isConnected {
                 BatteryBadge(level: level).help("Controller battery")
             }
+            if model.linkState == .asleep {
+                Button("Wake") { model.wakeController() }
+                    .controlSize(.small)
+                    .help("Wake the controller now. Once it has powered down, press Home on it instead.")
+            }
         }
     }
 
