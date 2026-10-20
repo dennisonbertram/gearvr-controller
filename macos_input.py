@@ -43,6 +43,7 @@ MOUSE_BUTTONS = {
     "middle": (Q.kCGEventOtherMouseDown, Q.kCGEventOtherMouseUp, Q.kCGEventOtherMouseDragged, Q.kCGMouseButtonCenter),
 }
 DOUBLE_CLICK_S = 0.4
+BOUNDS_TTL_S = 2.0  # re-read the display layout this often: monitors come and go
 
 
 def accessibility_ok() -> bool:
@@ -75,8 +76,11 @@ def _display_bounds() -> tuple[float, float, float, float]:
 class Output:
     def __init__(self):
         self.held: set[str] = set()
+        self.held_keys: set[str] = set()
+        self.held_media: set[str] = set()
         self._frac = [0.0, 0.0]
         self._bounds = _display_bounds()
+        self._bounds_t = time.monotonic()
         self._last_click = {"button": None, "t": 0.0, "count": 0}
 
     # --- pointer -----------------------------------------------------------
@@ -94,6 +98,9 @@ class Output:
         self._frac[0] -= ix
         self._frac[1] -= iy
         x, y = self.position()
+        if time.monotonic() - self._bounds_t > BOUNDS_TTL_S:
+            self._bounds = _display_bounds()
+            self._bounds_t = time.monotonic()
         x0, y0, x1, y1 = self._bounds
         x = min(max(x + ix, x0), x1)
         y = min(max(y + iy, y0), y1)
@@ -127,16 +134,16 @@ class Output:
         Q.CGEventPost(Q.kCGHIDEventTap, ev)
 
     # --- keyboard ----------------------------------------------------------
-    @staticmethod
-    def key(combo: str, down: bool) -> None:
+    def key(self, combo: str, down: bool) -> None:
+        (self.held_keys.add if down else self.held_keys.discard)(combo)
         code, flags = parse_combo(combo)
         ev = Q.CGEventCreateKeyboardEvent(None, code, down)
         if flags:
             Q.CGEventSetFlags(ev, flags)
         Q.CGEventPost(Q.kCGHIDEventTap, ev)
 
-    @staticmethod
-    def media(name: str, down: bool) -> None:
+    def media(self, name: str, down: bool) -> None:
+        (self.held_media.add if down else self.held_media.discard)(name)
         code = MEDIA_KEYS[name]
         state = 0xA if down else 0xB
         ev = NSEvent.otherEventWithType_location_modifierFlags_timestamp_windowNumber_context_subtype_data1_data2_(
@@ -146,3 +153,7 @@ class Output:
     def release_all(self) -> None:
         for name in list(self.held):
             self.mouse_button(name, False)
+        for combo in list(self.held_keys):
+            self.key(combo, False)
+        for name in list(self.held_media):
+            self.media(name, False)

@@ -14,7 +14,7 @@ public struct MagnetSettings: Equatable {
     public var radius = 40.0 // px from a target's edge: reach for steering / snapping
     public var breakaway = 45.0 // snap: px of hand motion needed to pull free
     public var stickiness = 0.25 // snap: fraction of hand motion the pointer shows while held
-    public var slowSpeed = 350.0 // snap: engages only below this pointer speed (px/s)
+    public var slowSpeed = 190.0 // snap: engages only below this pointer speed (px/s)
     public var friction = 1.0 // assist: motion scale over a target
     public var stillFriction = 1.0 // assist: motion scale over a target when nearly still (tremor)
     public var steer = 0.0 // assist: how much motion toward a target bends toward its centre
@@ -66,6 +66,7 @@ public final class Magnet {
     private var escape = CGVector.zero // hand motion accumulated while snapped
     private var speed = 0.0 // smoothed pointer speed, px/s
     private var lastMove: TimeInterval = 0
+    private var moveDT = 0.05 // time the current burst of moves covers
     private var lastTick: TimeInterval?
 
     static let glide = 0.3 // fraction of the remaining distance covered per tick
@@ -94,9 +95,14 @@ public final class Magnet {
 
     /// The hand moved the pointer by `d` from `p`. Returns where the pointer should go.
     public func userMove(from p: CGPoint, by d: CGVector, at t: TimeInterval) -> CGPoint {
-        let dt = min(max(t - lastMove, 0.002), 0.05)
+        // Each BLE packet carries three gyro samples, so moves arrive in bursts a few µs apart:
+        // the whole burst covers the time since the previous one.
+        if t - lastMove >= 0.001 {
+            moveDT = min(max(t - lastMove, 0.002), 0.05)
+            speed *= 0.85
+        }
         lastMove = t
-        speed = 0.85 * speed + 0.15 * (hypot(d.dx, d.dy) / dt)
+        speed += 0.15 * (hypot(d.dx, d.dy) / moveDT)
 
         guard let l = locked else {
             let m = assisted(d, at: p)
@@ -163,7 +169,7 @@ public final class Magnet {
         }
         // friction: slower over the target, more so when nearly still (damps tremor)
         if t.insetBy(dx: -3, dy: -3).contains(p) {
-            let f = speed < 80 ? settings.stillFriction : settings.friction
+            let f = speed < 45 ? settings.stillFriction : settings.friction
             m = CGVector(dx: m.dx * f, dy: m.dy * f)
         }
         return m

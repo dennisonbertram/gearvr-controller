@@ -70,6 +70,10 @@ public final class GyroBias {
     private var manualTarget = 0
     /// Hand-held stillness: a bit looser than the automatic detector, which needs certainty.
     static let manualWobbleLimit = 1.5
+    /// A bigger jump from the current zero looks like a slow steady turn (an arm sagging),
+    /// which has no wobble; it's only adopted once a second measurement agrees.
+    static let manualShiftLimit = 2.0
+    private var unconfirmed: SIMD3<Double>?
 
     public init(window size: Int = 100) { self.size = size }
 
@@ -102,7 +106,11 @@ public final class GyroBias {
         let mean = manualSamples.reduce(.zero, +) / Double(manualSamples.count)
         let variance = manualSamples.reduce(SIMD3<Double>.zero) { $0 + ($1 - mean) * ($1 - mean) } / Double(manualSamples.count)
         let wobble = variance.squareRoot().max()
-        let ok = wobble < Self.manualWobbleLimit
+        let still = wobble < Self.manualWobbleLimit
+        let shift = calibrated ? abs(mean - bias).max() : 0
+        let confirmed = shift < Self.manualShiftLimit || unconfirmed.map { abs(mean - $0).max() < 0.5 } == true
+        let ok = still && confirmed
+        unconfirmed = still && !confirmed ? mean : nil
         if ok {
             bias = mean
             calibrated = true
@@ -110,7 +118,8 @@ public final class GyroBias {
         }
         manualSamples.removeAll(keepingCapacity: true)
         manualTarget = 0
-        setManual(.finished(ok: ok, driftDPS: simd_length(mean), wobbleDPS: wobble))
+        // a steady turn is reported as the motion it was
+        setManual(.finished(ok: ok, driftDPS: simd_length(mean), wobbleDPS: still && !confirmed ? shift : wobble))
     }
 
     public func update(_ g: SIMD3<Double>) {
@@ -137,6 +146,7 @@ public final class GyroBias {
     public func reset() {
         window.removeAll()
         calibrated = false
+        unconfirmed = nil
         cancelManualCalibration()
     }
 }
@@ -159,6 +169,8 @@ public final class InputMapper {
     private var lastTimestamp: UInt32?
     private var touchPrev: (x: Int, y: Int)?
     private var touchStart: (t: TimeInterval, x: Int, y: Int)?
+    private var touchClicked = false // the pad was clicked during this touch: its lift is not a tap
+    private var touch = Touch.none // this packet's touch
     private var scrollFrac = 0.0
     private var smoothYaw = AdaptiveSmoother(amount: 0)
     private var smoothPitch = AdaptiveSmoother(amount: 0)
@@ -166,6 +178,7 @@ public final class InputMapper {
     private var pending: SIMD2<Double>? // deferred clutch-button press: buffered pointer motion
     private var suppressed: Set<ControllerButton> = [] // pressed during the clutch: ignored until released
     private var repeating: (button: ControllerButton, action: Action, since: TimeInterval, last: TimeInterval)?
+    private var heldKeys: [Action] = [] // keys and media keys that are down: released on reset
 
     static let swipeMaxS = 0.45
     static let swipeMinDist = 70
@@ -179,15 +192,19 @@ public final class InputMapper {
     }
 
     public func handle(_ p: Packet) {
-        checkClutch(p.touch)
+        touch = p.touch
         handleButtons(p)
+        checkClutch(p.touch)
         repeatHeldAction()
         handleMotion(p)
         handleTouch(p)
     }
 
     public func reset() {
-        sink.releaseAll()
+        let held = heldKeys
+        heldKeys.removeAll()
+        for action in held.reversed() { run(action, down: false) }
+        sink.releaseAll() // after ours, so nothing gets a second key-up
         pending = nil
         if clutched { clutched = false; onClutch?(false) }
         suppressed.removeAll()
@@ -196,6 +213,7 @@ public final class InputMapper {
         lastTimestamp = nil
         touchPrev = nil
         touchStart = nil
+        touchClicked = false
         smoothYaw.reset()
         smoothPitch.reset()
     }
@@ -203,6 +221,9 @@ public final class InputMapper {
     // MARK: actions
 
     private func run(_ action: Action, down: Bool) {
+        if Self.repeats(action) {
+            if down { heldKeys.append(action) } else if let i = heldKeys.firstIndex(of: action) { heldKeys.remove(at: i) }
+        }
         switch action {
         case .click(let b): sink.mouseButton(b, down: down)
         case .key(let combo): sink.key(combo, down: down)
@@ -254,9 +275,15 @@ public final class InputMapper {
         }
     }
 
-    /// Engage when a fresh touch lands in the zone while the clutch button is held.
+    /// Engage when a fresh touch lands in the zone while the clutch button is held (or with
+    /// the press). A thumb already resting there engages once the hand moves (see pointerMove),
+    /// so a still press with it is still a click.
     private func checkClutch(_ t: Touch) {
         guard pending != nil, t.touching, touchPrev == nil, inClutchZone(t) else { return }
+        engageClutch()
+    }
+
+    private func engageClutch() {
         pending = nil // the click never happens
         clutched = true
         if config.clutchSound { sink.sound("Tink") }
@@ -293,6 +320,7 @@ public final class InputMapper {
                 return
             }
             pending = nil
+            if touch.touching && inClutchZone(touch) { engageClutch(); return }
             run(config.action(for: config.clutchButton), down: true) // start the drag here
             d = buffered
         }
@@ -307,6 +335,7 @@ public final class InputMapper {
             let was = prevButtons.contains(name), isDown = p.buttons.contains(name)
             if was == isDown { continue }
             if isDown { freezeUntil = now() + config.clickFreezeMS / 1000 }
+            if isDown && name == .touchpad && p.touch.touching { touchClicked = true }
             if name == config.clutchButton {
                 clutchButton(down: isDown)
             } else if isDown && clutched {
@@ -338,7 +367,12 @@ public final class InputMapper {
             let dt = Double(s.timestampUS &- last) / 1e6
             lastTimestamp = s.timestampUS
             guard dt > 0, dt < 0.1, pointerOn, bias.calibrated, !bias.isCollecting,
-                  now() >= freezeUntil else { continue }
+                  now() >= freezeUntil else {
+                // start fresh when the pointer resumes, not from the rate before the pause
+                smoothYaw.reset()
+                smoothPitch.reset()
+                continue
+            }
 
             let w = s.gyro - bias.bias
             let u = simd_normalize(up)
@@ -356,6 +390,8 @@ public final class InputMapper {
                 }
                 yaw = smoothYaw.filter(yaw, dt: dt)
                 pitch = smoothPitch.filter(pitch, dt: dt)
+            } else {
+                smoothingAmount = 0 // turned back on later: rebuild, don't resume stale state
             }
             let dz = config.deadzoneDPS
             yaw = copysign(max(abs(yaw) - dz, 0), yaw)
@@ -374,11 +410,13 @@ public final class InputMapper {
         if clutched { // the clutch touch never scrolls
             touchPrev = nil
             touchStart = nil
+            if !t.touching { touchClicked = false }
             return
         }
         if mode == .off {
             touchPrev = t.touching ? (t.x, t.y) : nil
             touchStart = nil
+            if !t.touching { touchClicked = false }
             return
         }
         if t.touching {
@@ -412,12 +450,12 @@ public final class InputMapper {
                 let name = abs(dx) > abs(dy) ? (dx > 0 ? "swipe_right" : "swipe_left")
                                              : (dy > 0 ? "swipe_down" : "swipe_up")
                 tap(Action(config.gestures[name] ?? "none"))
-            } else if dur < Self.swipeMaxS && max(abs(dx), abs(dy)) < Self.tapMaxDist
-                        && !prevButtons.contains(.touchpad) {
+            } else if dur < Self.swipeMaxS && max(abs(dx), abs(dy)) < Self.tapMaxDist && !touchClicked {
                 tap(Action(config.gestures["tap"] ?? "none"))
             }
         }
         touchPrev = nil
         touchStart = nil
+        touchClicked = false
     }
 }

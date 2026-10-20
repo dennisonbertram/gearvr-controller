@@ -1,9 +1,12 @@
 // Synthesizes mouse, keyboard and media-key events with Quartz.
 // Requires Accessibility permission (System Settings > Privacy & Security).
 import AppKit
+import Carbon
 import CoreGraphics
 
 enum KeyCombo {
+    /// US-ANSI positions. Named keys always use these; character keys only when the
+    /// current layout has no unshifted key for the character.
     static let keycodes: [String: CGKeyCode] = [
         "a": 0, "s": 1, "d": 2, "f": 3, "h": 4, "g": 5, "z": 6, "x": 7, "c": 8, "v": 9,
         "b": 11, "q": 12, "w": 13, "e": 14, "r": 15, "y": 16, "t": 17, "1": 18, "2": 19,
@@ -24,15 +27,50 @@ enum KeyCombo {
     ]
 
     /// "cmd+shift+[" -> (keycode, flags). A literal plus is written "shift+=".
+    /// Characters are looked up in the current keyboard layout, so "cmd+z" is undo on AZERTY too.
     static func parse(_ combo: String) -> (CGKeyCode, CGEventFlags)? {
         let parts = combo.lowercased().split(separator: "+").map { $0.trimmingCharacters(in: .whitespaces) }
-        guard let key = parts.last, let code = keycodes[key] else { return nil }
+        guard let key = parts.last, let code = (key.count == 1 ? layoutKeycodes()[key] : nil) ?? keycodes[key]
+        else { return nil }
         var flags = CGEventFlags()
         for m in parts.dropLast() {
             guard let f = modifiers[m] else { return nil }
             flags.insert(f)
         }
         return (code, flags)
+    }
+
+    private static var layoutCache: [String: CGKeyCode]?
+    private static var layoutObserver: NSObjectProtocol?
+
+    /// Character -> keycode for the current keyboard layout (unshifted, keypad excluded).
+    /// Rebuilt when the user switches input source.
+    private static func layoutKeycodes() -> [String: CGKeyCode] {
+        if let layoutCache { return layoutCache }
+        if layoutObserver == nil {
+            layoutObserver = DistributedNotificationCenter.default().addObserver(
+                forName: NSNotification.Name(kTISNotifySelectedKeyboardInputSourceChanged as String),
+                object: nil, queue: .main) { _ in layoutCache = nil }
+        }
+        var map: [String: CGKeyCode] = [:]
+        if let source = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue(),
+           let data = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) {
+            let layoutData = Unmanaged<CFData>.fromOpaque(data).takeUnretainedValue() as Data
+            layoutData.withUnsafeBytes { raw in
+                guard let layout = raw.bindMemory(to: UCKeyboardLayout.self).baseAddress else { return }
+                for code in (0..<128).map(UInt16.init) where !(65...92).contains(code) { // skip the keypad
+                    var dead: UInt32 = 0, length = 0
+                    var chars = [UniChar](repeating: 0, count: 4)
+                    guard UCKeyTranslate(layout, code, UInt16(kUCKeyActionDown), 0, UInt32(LMGetKbdType()),
+                                         OptionBits(kUCKeyTranslateNoDeadKeysBit), &dead, 4, &length, &chars) == noErr,
+                          length > 0 else { continue }
+                    let s = String(utf16CodeUnits: chars, count: length).lowercased()
+                    if s.count == 1, s.unicodeScalars.allSatisfy({ $0.value > 32 }), map[s] == nil { map[s] = code }
+                }
+            }
+        }
+        layoutCache = map
+        return map
     }
 }
 
@@ -58,12 +96,15 @@ final class EventSink: InputSink {
     }
 
     private var held: Set<MouseButton> = []
+    private var heldKeys: Set<String> = [], heldMedia: Set<String> = []
     private var virtual: CGPoint? // sub-pixel pointer position we drive
     private var lastPosted: CGPoint?
     private var recentPosts: [(time: TimeInterval, point: CGPoint)] = [] // for telling our lag from real moves
     private var lastControllerMove = -Double.infinity
-    private var bounds = CGRect.zero
-    private var lastClick: (button: MouseButton, time: TimeInterval, count: Int64)?
+    private var displays: [CGRect] = []
+    private var lastClick: (button: MouseButton, time: TimeInterval, point: CGPoint, count: Int64)?
+    private var volumeGesture: (target: Double?, keySteps: Double, time: TimeInterval)?
+    private var dryRunMove: (dx: Double, dy: Double, time: TimeInterval) = (0, 0, 0)
     private let hud = MainActor.assumeIsolated { VolumeHUD() }
 
     init() {
@@ -76,7 +117,9 @@ final class EventSink: InputSink {
         var count: UInt32 = 0
         var ids = [CGDirectDisplayID](repeating: 0, count: 16)
         CGGetActiveDisplayList(16, &ids, &count)
-        bounds = ids.prefix(Int(count)).map { CGDisplayBounds($0) }.reduce(CGRect.null) { $0.union($1) }
+        // empty while displays are reconfiguring or on a headless Mac; moveCursor then does nothing
+        displays = ids.prefix(Int(count)).map { CGDisplayBounds($0) }.filter { !$0.isEmpty }
+        if displays.isEmpty { displays = [CGDisplayBounds(CGMainDisplayID())].filter { !$0.isEmpty } }
     }
 
     private var location: CGPoint { CGEvent(source: nil)?.location ?? .zero }
@@ -103,6 +146,7 @@ final class EventSink: InputSink {
             lastPosted = real
             return real
         }
+        if !postEvents { return v } // dry run: the real pointer never follows us
         // The window server applies posted events with a little lag, so the real pointer may
         // still be at one of the positions we posted a moment ago. Anything else is another device.
         let t = now
@@ -123,6 +167,13 @@ final class EventSink: InputSink {
 
     func move(dx: Double, dy: Double) {
         lastControllerMove = now
+        if !postEvents {
+            dryRunMove = (dryRunMove.dx + dx, dryRunMove.dy + dy, dryRunMove.time)
+            if now - dryRunMove.time > 0.1 {
+                log?(String(format: "move %+.1f %+.1f", dryRunMove.dx, dryRunMove.dy))
+                dryRunMove = (0, 0, now)
+            }
+        }
         let p = currentPosition()
         if magnetEnabled && held.isEmpty {
             moveCursor(to: magnet.userMove(from: p, by: CGVector(dx: dx, dy: dy), at: now))
@@ -140,7 +191,11 @@ final class EventSink: InputSink {
     }
 
     private func moveCursor(to q: CGPoint) {
-        let c = CGPoint(x: min(max(q.x, bounds.minX), bounds.maxX - 1), y: min(max(q.y, bounds.minY), bounds.maxY - 1))
+        // Clamp onto the nearest display, not their union: the window server would pin the
+        // pointer out of any gap between displays, and that would look like a move by another device.
+        func gap(_ r: CGRect) -> CGFloat { hypot(max(r.minX - q.x, 0, q.x - r.maxX + 1), max(r.minY - q.y, 0, q.y - r.maxY + 1)) }
+        guard q.x.isFinite, q.y.isFinite, let d = displays.min(by: { gap($0) < gap($1) }) else { return }
+        let c = CGPoint(x: min(max(q.x, d.minX), d.maxX - 1), y: min(max(q.y, d.minY), d.maxY - 1))
         virtual = c
         let ip = CGPoint(x: c.x.rounded(), y: c.y.rounded())
         let from = lastPosted ?? location
@@ -161,18 +216,19 @@ final class EventSink: InputSink {
 
     func mouseButton(_ b: MouseButton, down: Bool) {
         let t = Self.types(b)
+        let p = currentPosition()
         if down {
             let now = ProcessInfo.processInfo.systemUptime
-            if let last = lastClick, last.button == b, now - last.time < NSEvent.doubleClickInterval {
-                lastClick = (b, now, last.count + 1)
+            if let last = lastClick, last.button == b, now - last.time < NSEvent.doubleClickInterval,
+               hypot(p.x - last.point.x, p.y - last.point.y) <= 5 {
+                lastClick = (b, now, p, last.count + 1)
             } else {
-                lastClick = (b, now, 1)
+                lastClick = (b, now, p, 1)
             }
             held.insert(b)
         } else {
             held.remove(b)
         }
-        let p = currentPosition()
         let e = CGEvent(mouseEventSource: nil, mouseType: down ? t.down : t.up,
                         mouseCursorPosition: CGPoint(x: p.x.rounded(), y: p.y.rounded()), mouseButton: t.button)
         e?.setIntegerValueField(.mouseEventClickState, value: lastClick?.count ?? 1)
@@ -189,6 +245,7 @@ final class EventSink: InputSink {
         guard let (code, flags) = KeyCombo.parse(combo) else { return }
         let e = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: down)
         if !flags.isEmpty { e?.flags = flags }
+        if down { heldKeys.insert(combo) } else { heldKeys.remove(combo) }
         log?("key \(combo) \(down ? "down" : "up")")
         post(e)
     }
@@ -200,6 +257,7 @@ final class EventSink: InputSink {
                                    modifierFlags: NSEvent.ModifierFlags(rawValue: UInt(state << 8)),
                                    timestamp: 0, windowNumber: 0, context: nil, subtype: 8,
                                    data1: (code << 16) | (state << 8), data2: -1)
+        if down { heldMedia.insert(name) } else { heldMedia.remove(name) }
         log?("media \(name) \(down ? "down" : "up")")
         post(e?.cgEvent)
     }
@@ -218,18 +276,43 @@ final class EventSink: InputSink {
     }
 
     /// Continuous volume from the touchpad. Media keys move in sixteenths, so this goes
-    /// straight to the output device and shows its own level indicator.
+    /// straight to the output device and shows its own level indicator. The level is read once
+    /// per gesture and accumulated here: outputs with coarse steps (Bluetooth, some USB) round a
+    /// small change back, so re-reading it every packet would stall a slow slide.
     func adjustVolume(by delta: Double) {
-        guard let current = SystemAudio.volume else { return }
-        let level = min(max(current + delta, 0), 1)
-        guard abs(level - current) > 0.0005 else { return }
-        log?(String(format: "volume %.0f%%", level * 100))
-        guard postEvents else { return }
-        SystemAudio.setVolume(level)
-        MainActor.assumeIsolated { hud.show(level: level) }
+        let t = now
+        if volumeGesture == nil || t - volumeGesture!.time > 0.3 {
+            volumeGesture = (SystemAudio.volume, 0, t)
+            if volumeGesture!.target == nil { log?("output volume not adjustable; using volume keys") }
+        }
+        volumeGesture!.time = t
+        if let current = volumeGesture!.target {
+            let level = min(max(current + delta, 0), 1)
+            guard level != current else { return } // already at 0 or 100%
+            volumeGesture!.target = level
+            log?(String(format: "volume %.0f%%", level * 100))
+            guard postEvents else { return }
+            if SystemAudio.setVolume(level) {
+                MainActor.assumeIsolated { hud.show(level: level) }
+                return
+            }
+            volumeGesture!.target = nil
+            log?("setting the output volume failed; using volume keys")
+        }
+        // No software volume (HDMI, DisplayPort, multi-output devices): send a volume key per
+        // sixteenth, as the keyboard would, so macOS shows its own HUD for the device.
+        volumeGesture!.keySteps += delta * 16
+        while abs(volumeGesture!.keySteps) >= 1 {
+            let up = volumeGesture!.keySteps > 0
+            media(up ? "volume_up" : "volume_down", down: true)
+            media(up ? "volume_up" : "volume_down", down: false)
+            volumeGesture!.keySteps += up ? -1 : 1
+        }
     }
 
     func releaseAll() {
         for b in held { mouseButton(b, down: false) }
+        for k in heldKeys { key(k, down: false) }
+        for m in heldMedia { media(m, down: false) }
     }
 }

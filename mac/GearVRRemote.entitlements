@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Hardened-runtime entitlements for Developer ID builds (build.sh applies them only then).
+     Not sandboxed: see docs/LAUNCH.md for why the App Store's sandbox doesn't fit this app.
+     apple-events: "shell:" button actions often run osascript to drive other apps. -->
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.automation.apple-events</key><true/>
+</dict>
+</plist>

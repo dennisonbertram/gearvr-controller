@@ -33,26 +33,31 @@ struct MenuView: View {
                     .controlSize(.small)
             }
             VStack(alignment: .leading, spacing: 4) {
-                Text("Touchpad")
-                Picker("Touchpad", selection: $model.config.touchModePointerOn) {
+                // the mode in use right now: there's one for air mouse on and one for off
+                Text(model.pointerOn ? "Touchpad (air mouse on)" : "Touchpad (air mouse off)")
+                Picker("Touchpad", selection: Binding(
+                    get: { model.pointerOn ? model.config.touchModePointerOn : model.config.touchModePointerOff },
+                    set: { if model.pointerOn { model.config.touchModePointerOn = $0 } else { model.config.touchModePointerOff = $0 } })) {
                     ForEach(TouchMode.allCases, id: \.self) { Text($0.title).tag($0) }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
             }
 
-            LiveControllerView(live: model.live, clutched: model.clutched, streaming: model.isStreaming)
+            LiveControllerView(live: model.live, clutched: model.clutched, streaming: model.isStreaming,
+                               connected: model.isConnected)
 
             Divider()
             HStack {
                 Button("Settings…") { model.presentSettings() }
-                Button("Recalibrate…") { model.showCalibration() }
-                    .help("Re-measure the gyro's zero point. Use this if the pointer drifts while your hand is still.")
+                Button("Calibrate…") { model.showCalibration() }
+                    .help("Recalibrate the gyro: re-measure the gyro's zero point. Use this if the pointer drifts while your hand is still.")
                 Button("Training…") { model.showTraining() }
                     .help("A one-minute aiming exercise that suggests pointer speed, smoothing and magnet strength for you.")
                 Spacer()
                 Button("Quit") { NSApp.terminate(nil) }
             }
+            .controlSize(.small)
         }
         .padding(14)
         .frame(width: 310)
@@ -62,16 +67,18 @@ struct MenuView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            Image(nsImage: ControllerGlyph.image(model.isStreaming ? .active : .disconnected, size: 30))
+            Image(nsImage: ControllerGlyph.image(model.glyphStyle, size: 30))
                 .renderingMode(.template)
-                .foregroundStyle(model.isStreaming ? Color.accentColor : .secondary)
+                .foregroundStyle(model.glyphStyle == .active ? Color.accentColor : .secondary)
                 .frame(width: 30)
             VStack(alignment: .leading, spacing: 1) {
                 Text(model.deviceName ?? "Gear VR Controller").font(.headline).lineLimit(1)
                 Text(model.statusText).font(.caption).foregroundStyle(.secondary).lineLimit(2)
             }
             Spacer(minLength: 4)
-            if let level = model.battery, model.isStreaming { BatteryBadge(level: level) }
+            if let level = model.battery, model.isConnected {
+                BatteryBadge(level: level).help("Controller battery")
+            }
         }
     }
 
@@ -133,6 +140,7 @@ struct LiveControllerView: View {
     let live: LiveState
     let clutched: Bool
     let streaming: Bool
+    var connected = false
 
     var body: some View {
         HStack(alignment: .center, spacing: 14) {
@@ -182,7 +190,7 @@ struct LiveControllerView: View {
     }
 
     private var footer: String {
-        guard streaming else { return "not connected" }
+        guard streaming else { return connected ? "sensors off" : "not connected" }
         let cal = live.gyroCalibrated ? "gyro calibrated" : "calibrating gyro…"
         let temp = live.temperature.map { " · \($0)°C" } ?? ""
         return "\(Int(live.packetRate)) pkt/s · \(cal)\(temp)"

@@ -8,9 +8,9 @@ gyro air-mouse, trackpad, and media remote. It's written in Swift
 
 **Download:** grab `GearVR-Remote-x.y.z.dmg` from the
 [latest release](https://github.com/dennisonbertram/gearvr-controller/releases/latest),
-open it, and drag the app to Applications. The app isn't notarized, so the first
-time you open it macOS will say it can't verify the developer. Go to System
-Settings → Privacy & Security and click **Open Anyway**.
+open it, and drag the app to Applications, then open it from there (not from
+the disk image). If macOS says it can't verify the developer, the build isn't
+notarized yet: go to System Settings → Privacy & Security and click **Open Anyway**.
 
 **Or build it:**
 
@@ -35,8 +35,9 @@ controller glyph at the top right. A Dock icon appears whenever one of its windo
 is open, and opening *GearVR Remote* again while it's running brings the Welcome
 and Settings window back. If you'd rather keep it in the Dock permanently, turn on
 **Always show in the Dock** in Settings → General; you can then drag it to your
-Dock and launch it like any other app. **Start when you log in** is in the same
-place, and puts it under System Settings → General → Login Items.
+Dock and launch it like any other app. **Start when you log in** is in the same place,
+and adds it to System Settings → General → Login Items. If the switch turns itself
+back off, macOS wants you to approve it: switch GearVR Remote on in Login Items.
 
 macOS ties these permissions to the app's code signature. An ad-hoc signed app
 gets a new signature every build, so after rebuilding, the Accessibility switch
@@ -50,7 +51,9 @@ allow Accessibility again.
 
 ## Using it
 
-The defaults match `../config.toml`:
+The default button mapping matches `../config.toml` (the Python remote). The app
+keeps its own settings, so its default pointer speed is 18 px/degree rather than
+config.toml's 22, and smoothing, the magnet, and battery care exist only here.
 
 | Control | Action |
 |---|---|
@@ -102,7 +105,7 @@ Settings → Buttons.
 adapts to speed: slow, careful movements are steadied, and fast moves come through
 without lag. Set it to 0% to turn it off.
 
-**Recalibrate** (the *Recalibrate…* button in the menu) re-measures the gyro's
+**Recalibrate** (the *Calibrate…* button in the menu) re-measures the gyro's
 zero point: put the controller down, press Start, and leave it still for two
 seconds. Use it if the pointer creeps on its own while your hand is still. If the
 controller moves during the measurement it says so and keeps the old calibration.
@@ -117,7 +120,7 @@ The menu has quick switches for pausing control, the air-mouse, and the clutch,
 plus pointer speed, touchpad mode, and a live view of the buttons and touchpad.
 **Settings…** lets you remap every button and swipe (clicks, key combos like
 `cmd+[`, media keys, or shell commands) and tune the pointer, touchpad, and clutch.
-You can also turn on launch at login there.
+You can also turn on **Start when you log in** there.
 
 > Don't hold **Home** for several seconds. That puts the controller into pairing
 > mode and wipes its bond with the Mac. If it happens, use *Forget This Device*

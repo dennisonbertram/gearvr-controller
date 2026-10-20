@@ -22,6 +22,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var clutched = false
     @Published private(set) var live = LiveState()
     @Published private(set) var calibration = GyroBias.Calibration.idle
+    /// Follows the gyro bias even while the menu (and so `live`) isn't on screen.
+    @Published private(set) var gyroCalibrated = false
     /// The menu-bar icon is invisible (behind the notch on a full menu bar).
     @Published private(set) var menuBarIconHidden = false
     @Published var enabled = true {
@@ -34,6 +36,7 @@ final class AppModel: ObservableObject {
     @Published var pointerOn: Bool {
         didSet {
             mapper.pointerOn = pointerOn
+            updateMagnet()
             updatePower()
         }
     }
@@ -46,6 +49,8 @@ final class AppModel: ObservableObject {
         }
     }
     @Published var launchAtLogin = SMAppService.mainApp.status == .enabled
+    /// Why launch at login isn't on although it was asked for (needs approval, or an error).
+    @Published private(set) var launchAtLoginNote: String?
     @Published var settingsTab = SettingsTab.welcome
 
     /// Opens the Settings window; installed by a view that has the SwiftUI openSettings action.
@@ -74,7 +79,12 @@ final class AppModel: ObservableObject {
     private var packetRate = 0.0
     private var timers: [Timer] = []
     private var lastActivity = ProcessInfo.processInfo.systemUptime
-    private var macAsleep = false
+    private var macAsleep = false // the Mac or its display is asleep
+    private var screenLocked = false // locked, or switched to another user
+    private var macAway: Bool { macAsleep || screenLocked }
+    /// Nothing has happened on the controller for a while, so the magnet's scanner rests.
+    private var controllerIdle = false
+    private static let magnetIdleAfter: TimeInterval = 30
     private static let configKey = "config.v1"
 
     init() {
@@ -116,11 +126,17 @@ final class AppModel: ObservableObject {
             self.linkState = state
             self.deviceName = self.link.deviceName
             self.log("state: \(state)")
-            if state != .streaming { self.mapper.bias.reset() }
+            // connecting (e.g. woken with Home) restarts the idle countdown, or the stale
+            // clock would put it straight back to sleep
+            if state == .connecting { self.lastActivity = ProcessInfo.processInfo.systemUptime }
             self.updateMagnet()
         }
-        link.onDisconnect = { [weak self] in self?.mapper.reset() }
+        link.onDisconnect = { [weak self] in
+            self?.mapper.reset()
+            self?.mapper.bias.reset() // the zero-rate bias belongs to the connection, not the stream mode
+        }
         link.onPacket = { [weak self] in self?.handle($0) }
+        link.wantsHighRate = pointerOn && enabled // before the first handshake, not at the first tick
         link.start()
 
         save() // persist any migration of older settings
@@ -139,23 +155,31 @@ final class AppModel: ObservableObject {
         // battery care: the controller can't sleep by itself while we hold it awake with
         // keep-alives, so sleep it when the Mac does and when nothing has happened for a while
         let workspace = NSWorkspace.shared.notificationCenter
-        for name in [NSWorkspace.willSleepNotification, NSWorkspace.screensDidSleepNotification,
-                     NSWorkspace.sessionDidResignActiveNotification] {
-            workspace.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                self?.macAsleep = true
-                self?.updatePower()
+        let observe = { (center: NotificationCenter, names: [Notification.Name], update: @escaping (AppModel) -> Void) in
+            for name in names {
+                center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                    guard let self else { return }
+                    update(self)
+                    self.macAwayChanged()
+                }
             }
         }
-        for name in [NSWorkspace.didWakeNotification, NSWorkspace.screensDidWakeNotification,
-                     NSWorkspace.sessionDidBecomeActiveNotification] {
-            workspace.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                self?.macAsleep = false
-                self?.noteActivity()
-            }
-        }
+        observe(workspace, [NSWorkspace.willSleepNotification, NSWorkspace.screensDidSleepNotification]) { $0.macAsleep = true }
+        observe(workspace, [NSWorkspace.didWakeNotification, NSWorkspace.screensDidWakeNotification]) { $0.macAsleep = false }
+        // the display waking up to the lock screen doesn't count; only unlocking does
+        observe(DistributedNotificationCenter.default(), [Notification.Name("com.apple.screenIsLocked")]) { $0.screenLocked = true }
+        observe(DistributedNotificationCenter.default(), [Notification.Name("com.apple.screenIsUnlocked")]) { $0.screenLocked = false }
+        observe(workspace, [NSWorkspace.sessionDidResignActiveNotification]) { $0.screenLocked = true }
+        observe(workspace, [NSWorkspace.sessionDidBecomeActiveNotification]) { $0.screenLocked = false }
 
-        // the status item needs a moment to be placed before we can tell where it landed
+        // the status item needs a moment to be placed before we can tell where it landed, and
+        // other apps' items or a display change can push it behind the notch later
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in self?.checkMenuBarIcon() }
+        NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
+                                               object: nil, queue: .main) { [weak self] _ in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self?.checkMenuBarIcon() }
+        }
+        timers.append(Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in self?.checkMenuBarIcon() })
         timers.append(Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.tick() })
         timers.append(Timer.scheduledTimer(withTimeInterval: 1.0 / 15, repeats: true) { [weak self] _ in
             if self?.liveVisible == true { self?.publishLive() }
@@ -169,7 +193,9 @@ final class AppModel: ObservableObject {
 
     /// Magnetic targets run only while the controller is actually driving the pointer.
     private func updateMagnet() {
-        let active = config.magnetEnabled && enabled && linkState == .streaming
+        let steering = pointerOn || config.touchModePointerOff == .cursor
+        let active = config.magnetEnabled && enabled && linkState == .streaming && steering && !controllerIdle
+        guard active != sink.magnetEnabled || active != (magnetTimer != nil) else { return }
         sink.magnetEnabled = active
         if active {
             scanner.start()
@@ -205,8 +231,15 @@ final class AppModel: ObservableObject {
     /// Wake the controller and restart the idle countdown.
     func noteActivity() {
         lastActivity = ProcessInfo.processInfo.systemUptime
+        if controllerIdle { controllerIdle = false; updateMagnet() }
         if link.isAsleep { return } // it wakes on its own advertisement, nothing to do here
         updatePower()
+    }
+
+    private func macAwayChanged() {
+        log("mac \(macAsleep ? "asleep" : "awake"), \(screenLocked ? "locked" : "unlocked")")
+        link.wakeOnHome = !macAway
+        if macAway { updatePower() } else { noteActivity() }
     }
 
     /// Decides how hard the controller should be working right now.
@@ -215,7 +248,9 @@ final class AppModel: ObservableObject {
         guard !link.isAsleep else { return }
         let idleFor = ProcessInfo.processInfo.systemUptime - lastActivity
         let limit = config.sleepAfterMinutes * 60
-        if macAsleep || (limit > 0 && idleFor > limit) {
+        // idle only counts once it's connected: a wake with Home takes a moment to stream
+        let connected = linkState == .streaming || linkState == .lowPower
+        if macAway || (connected && limit > 0 && idleFor > limit) {
             link.sleepNow()
         } else {
             link.setLowPower(!enabled)
@@ -224,8 +259,11 @@ final class AppModel: ObservableObject {
 
     private func tick() {
         updatePower()
+        let idle = ProcessInfo.processInfo.systemUptime - lastActivity > Self.magnetIdleAfter
+        if idle != controllerIdle { controllerIdle = idle; updateMagnet() }
         packetRate = Double(packets)
         packets = 0
+        if mapper.bias.calibrated != gyroCalibrated { gyroCalibrated = mapper.bias.calibrated }
         let trusted = AXIsProcessTrusted()
         if trusted != accessibilityTrusted {
             accessibilityTrusted = trusted
@@ -255,11 +293,13 @@ final class AppModel: ObservableObject {
     func resetConfig() { config = RemoteConfig() }
 
     /// Warn once if the icon landed somewhere invisible, otherwise the app looks like it
-    /// never launched.
-    private func checkMenuBarIcon() {
+    /// never launched. The flag itself follows the icon, so the warning clears once it's fixed.
+    func checkMenuBarIcon() {
         let hidden = MenuBarVisibility.iconIsHidden()
-        if hidden != menuBarIconHidden { menuBarIconHidden = hidden }
-        log("menu bar icon hidden: \(hidden)")
+        if hidden != menuBarIconHidden {
+            menuBarIconHidden = hidden
+            log("menu bar icon hidden: \(hidden)")
+        }
         guard hidden, !UserDefaults.standard.bool(forKey: "warnedMenuBarHidden") else { return }
         UserDefaults.standard.set(true, forKey: "warnedMenuBarHidden")
         presentSettings(.welcome)
@@ -281,6 +321,8 @@ final class AppModel: ObservableObject {
 
     func presentSettings(_ tab: SettingsTab? = nil) {
         if let tab { settingsTab = tab }
+        refreshLaunchAtLogin()
+        if settingsTab == .welcome { checkMenuBarIcon() }
         guard let open = openSettingsAction else { pendingSettings = true; return }
         NSApp.activate(ignoringOtherApps: true)
         open()
@@ -288,13 +330,28 @@ final class AppModel: ObservableObject {
     }
 
     func setLaunchAtLogin(_ on: Bool) {
+        launchAtLoginNote = nil
         do {
             if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
         } catch {
             log("launch at login: \(error.localizedDescription)")
+            launchAtLoginNote = error.localizedDescription
         }
-        launchAtLogin = SMAppService.mainApp.status == .enabled
+        refreshLaunchAtLogin()
     }
+
+    /// Follows changes made in System Settings → Login Items.
+    func refreshLaunchAtLogin() {
+        let status = SMAppService.mainApp.status
+        if launchAtLogin != (status == .enabled) { launchAtLogin = status == .enabled }
+        if status == .requiresApproval {
+            launchAtLoginNote = "Allow GearVR Remote under System Settings → General → Login Items."
+        } else if status == .enabled {
+            launchAtLoginNote = nil
+        }
+    }
+
+    func openLoginItemsSettings() { SMAppService.openSystemSettingsLoginItems() }
 
     func openAccessibilitySettings() {
         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
@@ -309,6 +366,8 @@ final class AppModel: ObservableObject {
     // MARK: presentation
 
     var isStreaming: Bool { linkState == .streaming }
+    /// Connected, including while paused with the sensors off or restarting the stream.
+    var isConnected: Bool { [.handshaking, .streaming, .lowPower].contains(linkState) }
 
     var statusText: String {
         switch linkState {
@@ -328,7 +387,7 @@ final class AppModel: ObservableObject {
     }
 
     var glyphStyle: ControllerGlyph.Style {
-        guard isStreaming else { return .disconnected }
-        return enabled ? .active : .paused
+        guard isConnected else { return .disconnected }
+        return enabled && linkState != .lowPower ? .active : .paused
     }
 }

@@ -36,6 +36,7 @@ final class DockPresence {
         guard NSApp.activationPolicy() != wanted else { return }
         NSApp.setActivationPolicy(wanted)
         model.log("dock icon \(wanted == .regular ? "shown" : "hidden")")
-        if wanted == .regular { NSApp.activate(ignoringOtherApps: true) }
+        // only come forward for a window; a Dock icon alone (e.g. at login) mustn't steal focus
+        if wanted == .regular, hasVisibleWindow { NSApp.activate(ignoringOtherApps: true) }
     }
 }

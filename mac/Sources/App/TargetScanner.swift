@@ -1,10 +1,10 @@
 // Finds clickable UI elements (buttons, links, checkboxes, menu items, Dock icons…)
 // near the pointer using the Accessibility API, for the magnetic pointer assist.
 //
-// Runs on a background queue ~12 times a second while active. It looks up the element
-// under the pointer, climbs to its window (or menu bar / Dock list), then walks only the
-// part of that subtree that intersects a box around the pointer, nearest-first, under a
-// time budget.
+// Runs on a background queue ~12 times a second while active (AppModel stops it while the
+// air-mouse is off or the controller is idle). It looks up the element under the pointer,
+// takes its window (or menu bar / Dock list), then walks only the part of that subtree that
+// intersects a box around the pointer, nearest-first, under a time budget.
 import AppKit
 import ApplicationServices
 
@@ -13,11 +13,14 @@ final class TargetScanner {
     var onTargets: (([CGRect]) -> Void)?
     var searchRadius: CGFloat = 220
 
+    // timer, lastScan and the app sets are only touched on `queue`
     private let queue = DispatchQueue(label: "gearvr.target-scanner", qos: .userInitiated)
     private var timer: DispatchSourceTimer?
     private let systemWide = AXUIElementCreateSystemWide()
     private var lastScan: (point: CGPoint, time: TimeInterval)?
     private var tunedApps: Set<pid_t> = []
+    private var enhancedApps: Set<pid_t> = [] // AXEnhancedUserInterface slows Chrome: undone on stop
+    private let dryRun = CommandLine.arguments.contains("--dry-run")
     /// Accessibility requests to our own process are served on the calling thread, which would
     /// drive SwiftUI off the main thread and trap. Our own windows are never snap targets anyway.
     private let ownPID = getpid()
@@ -27,6 +30,8 @@ final class TargetScanner {
         "AXMenuItem", "AXMenuBarItem", "AXDisclosureTriangle", "AXComboBox", "AXDockItem",
         "AXIncrementor", "AXColorWell", "AXRow", "AXTab",
     ]
+    /// Elements whose children are only visible inside their frame.
+    static let clippingRoles: Set<String> = ["AXScrollArea", "AXWebArea", "AXWindow"]
     static let chromiumApps: Set<String> = [
         "com.google.Chrome", "com.google.Chrome.canary", "com.brave.Browser", "com.microsoft.edgemac",
         "company.thebrowser.Browser", "com.vivaldi.Vivaldi", "com.operasoftware.Opera", "org.chromium.Chromium",
@@ -34,24 +39,44 @@ final class TargetScanner {
 
     init() {
         AXUIElementSetMessagingTimeout(systemWide, 0.08) // never let a busy app stall the scan
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didTerminateApplicationNotification,
+                                                          object: nil, queue: nil) { [weak self] note in
+            guard let pid = (note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)?.processIdentifier
+            else { return }
+            self?.queue.async { self?.tunedApps.remove(pid); self?.enhancedApps.remove(pid) }
+        }
+        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification,
+                                               object: nil, queue: nil) { [weak self] _ in
+            self?.queue.sync { self?.untune() }
+        }
     }
 
-    var isRunning: Bool { timer != nil }
+    /// Main thread only.
+    private(set) var isRunning = false
 
     func start() {
-        guard timer == nil else { return }
-        let t = DispatchSource.makeTimerSource(queue: queue)
-        t.schedule(deadline: .now(), repeating: .milliseconds(80))
-        t.setEventHandler { [weak self] in self?.tick() }
-        t.resume()
-        timer = t
+        guard !isRunning else { return }
+        isRunning = true
+        queue.async { [self] in
+            guard timer == nil else { return }
+            let t = DispatchSource.makeTimerSource(queue: queue)
+            t.schedule(deadline: .now(), repeating: .milliseconds(80), leeway: .milliseconds(20))
+            t.setEventHandler { [weak self] in self?.tick() }
+            t.resume()
+            timer = t
+        }
     }
 
+    /// Serialized after any scan in flight, so its targets can't land after the clear.
     func stop() {
-        timer?.cancel()
-        timer = nil
-        lastScan = nil
-        DispatchQueue.main.async { [weak self] in self?.onTargets?([]) }
+        isRunning = false
+        queue.async { [self] in
+            timer?.cancel()
+            timer = nil
+            lastScan = nil
+            untune()
+            DispatchQueue.main.async { [weak self] in self?.onTargets?([]) }
+        }
     }
 
     private func tick() {
@@ -74,7 +99,9 @@ final class TargetScanner {
             let a = Double(i) * .pi / 4
             return CGPoint(x: p.x + ring * cos(a), y: p.y + ring * sin(a))
         }
+        let probeDeadline = ProcessInfo.processInfo.systemUptime + budget / 2
         for q in probes {
+            if !roots.isEmpty && ProcessInfo.processInfo.systemUptime > probeDeadline { break } // busy app
             var hitRef: AXUIElement?
             guard AXUIElementCopyElementAtPosition(systemWide, Float(q.x), Float(q.y), &hitRef) == .success,
                   let hit = hitRef, pid(of: hit) != ownPID else { continue }
@@ -96,7 +123,7 @@ final class TargetScanner {
         // by the time budget (first contact with a busy app) has already found the nearest targets.
         // Children are queued with their parent's distance and re-queued once their own is known.
         var heap = NodeHeap()
-        for r in roots { heap.push(Node(element: r, key: 0, values: nil)) }
+        for r in roots { heap.push(Node(element: r, key: 0, clip: .infinite, values: nil)) }
         while var node = heap.pop(), visited < 2500, ProcessInfo.processInfo.systemUptime < deadline {
             if node.values == nil {
                 visited += 1
@@ -107,7 +134,8 @@ final class TargetScanner {
                       let values = valuesRef as? [AnyObject], values.count == 4 else { continue }
                 node.values = values
                 if let f = Self.frame(position: values[1], size: values[2]) {
-                    if !f.intersects(region) { continue } // prune: nothing below can be near
+                    if !f.intersects(region.intersection(node.clip)) { continue } // prune: nothing below can be near or visible
+                    if let role = values[0] as? String, Self.clippingRoles.contains(role) { node.clip = node.clip.intersection(f) }
                     let d = Self.distance(p, f)
                     if d > node.key + 1 { // farther than its parent suggested: requeue by its own distance
                         node.key = d
@@ -117,12 +145,14 @@ final class TargetScanner {
                 }
             }
             guard let values = node.values else { continue }
+            // only the part inside its scroll area / web view / window is on screen (web pages expose
+            // links scrolled out of view with real coordinates, e.g. under the toolbar)
             if let role = values[0] as? String, Self.clickableRoles.contains(role),
-               let f = Self.frame(position: values[1], size: values[2]), Self.usable(f) {
+               let f = Self.frame(position: values[1], size: values[2])?.intersection(node.clip), Self.usable(f) {
                 found.append(f)
             }
             if let children = values[3] as? [AXUIElement] {
-                for c in children { heap.push(Node(element: c, key: node.key, values: nil)) }
+                for c in children { heap.push(Node(element: c, key: node.key, clip: node.clip, values: nil)) }
             }
         }
         // drop exact duplicates (same element reached twice, or button + identical cell)
@@ -143,6 +173,7 @@ final class TargetScanner {
 
     /// The top-level container below the application: a window, the menu bar, the Dock list.
     private func container(of element: AXUIElement) -> AXUIElement {
+        if let window: AXUIElement = attribute(element, kAXWindowAttribute) { return window } // one call, not a climb
         var root = element
         for _ in 0..<60 {
             guard let parent: AXUIElement = attribute(root, kAXParentAttribute),
@@ -173,21 +204,34 @@ final class TargetScanner {
 
     /// Chromium and Electron only build their accessibility tree for assistive apps
     /// that ask for it; without this, web pages expose no buttons or links.
+    /// AXManualAccessibility is enough for current Chromium; AXEnhancedUserInterface (which slows
+    /// Chrome and upsets window managers) is only the fallback for older ones, and is undone on stop.
     private func tune(app hit: AXUIElement) {
         let pid = pid(of: hit)
-        guard pid != 0, pid != ownPID, !tunedApps.contains(pid) else { return }
-        tunedApps.insert(pid)
+        guard !dryRun, pid != 0, pid != ownPID, !tunedApps.contains(pid) else { return }
         let app = AXUIElementCreateApplication(pid)
-        AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
-        if let id = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier, Self.chromiumApps.contains(id) {
-            AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+        var result = AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        if result != .success, let id = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier,
+           Self.chromiumApps.contains(id) {
+            result = AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+            if result == .success { enhancedApps.insert(pid) }
         }
+        if result != .cannotComplete { tunedApps.insert(pid) } // retry only when the app was too busy to answer
+    }
+
+    private func untune() {
+        for pid in enhancedApps {
+            AXUIElementSetAttributeValue(AXUIElementCreateApplication(pid), "AXEnhancedUserInterface" as CFString, kCFBooleanFalse)
+            tunedApps.remove(pid)
+        }
+        enhancedApps = []
     }
 }
 
 private struct Node {
     let element: AXUIElement
     var key: Double // distance from the pointer (lower bound until the element's frame is read)
+    var clip: CGRect // visible area of the enclosing scroll areas and window
     var values: [AnyObject]?
 }
 

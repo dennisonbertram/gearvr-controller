@@ -3,23 +3,65 @@ name: Mac app
 on:
   push:
     branches: [main]
-    paths: ["mac/**", "tests_fixtures.json", ".github/workflows/release-mac.yml"]
+    paths: ["mac/**", "*.py", "requirements.txt", "caps/**", "tests_fixtures.json", ".github/workflows/release-mac.yml"]
     tags: ["v*"]
   pull_request:
-    paths: ["mac/**"]
+    paths: ["mac/**", "*.py", "requirements.txt", "caps/**", "tests_fixtures.json", ".github/workflows/release-mac.yml"]
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  build:
+  python:
     runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Test Python tools
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -r requirements.txt
+          .venv/bin/python -m pytest -q
+
+  build:
+    needs: python
+    runs-on: macos-15
+    # Signing and notarization secrets are optional. Without them (forks, or before the
+    # Apple Developer account is set up) the DMG is ad-hoc signed, as before.
+    # See docs/LAUNCH.md for how to create them.
+    env:
+      MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+      MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
     steps:
       - uses: actions/checkout@v5
 
       - name: Test
         run: mac/build.sh test
+
+      - name: Import Developer ID certificate
+        if: env.MACOS_CERT_P12_BASE64 != ''
+        run: |
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          password=$(openssl rand -hex 16)
+          echo "$MACOS_CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/cert.p12" -P "$MACOS_CERT_PASSWORD" -f pkcs12 -k "$keychain" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -k "$password" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" login.keychain
+          rm "$RUNNER_TEMP/cert.p12"
+          identity=$(security find-identity -v -p codesigning "$keychain" | awk -F'"' '/Developer ID Application/ {print $2; exit}')
+          [ -n "$identity" ] || { echo "no Developer ID Application identity in MACOS_CERT_P12_BASE64"; exit 1; }
+          echo "SIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
 
       - name: Build DMG
         run: |

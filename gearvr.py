@@ -127,7 +127,11 @@ class Controller:
         device = await find_controller()
         self.client = BleakClient(device, disconnected_callback=self._disconnected)
         await self.client.connect()
-        await self.client.start_notify(DATA_CHAR, self._on_notify)
+        try:
+            await self.client.start_notify(DATA_CHAR, self._on_notify)
+        except BaseException:
+            await self.client.disconnect()  # __aexit__ won't run: don't leave the link open
+            raise
         return self
 
     async def __aexit__(self, *exc):
