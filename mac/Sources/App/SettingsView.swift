@@ -225,6 +225,18 @@ struct TouchpadTab: View {
                         set: { model.config.gestures[key] = $0 }))
                 }
             }
+            Section {
+                ForEach(RemoteConfig.padSpots, id: \.self) { spot in
+                    ActionEditor(title: "Hold \(spot)", action: Binding(
+                        get: { model.config.padHolds[spot] ?? "none" },
+                        set: { model.config.padHolds[spot] = $0 }))
+                }
+            } header: {
+                Text("Click and hold the touchpad")
+            } footer: {
+                Text("Click the touchpad on one spot and keep it pressed for half a second to run that spot's action, e.g. a key combo like cmd+shift+4. A quick click is still a normal touchpad click, and a spot set to Nothing behaves like a normal click. Not available while the touchpad is the clutch button.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
     }

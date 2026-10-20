@@ -114,6 +114,10 @@ public struct RemoteConfig: Codable, Equatable {
         "tap": "none",
     ]
 
+    /// Click the touchpad and hold: each spot can run its own action ("none" = a normal click).
+    public static let padSpots = ["top", "bottom", "left", "right", "center"]
+    public var padHolds: [String: String] = Dictionary(uniqueKeysWithValues: padSpots.map { ($0, "none") })
+
     public init() {}
 
     public func action(for button: ControllerButton) -> Action { Action(buttons[button.rawValue] ?? "none") }
@@ -137,6 +141,7 @@ public struct RemoteConfig: Codable, Equatable {
         take(.alwaysShowInDock, &alwaysShowInDock); take(.sleepAfterMinutes, &sleepAfterMinutes)
         take(.repeatWhileHeld, &repeatWhileHeld); take(.repeatDelayMS, &repeatDelayMS)
         take(.repeatIntervalMS, &repeatIntervalMS); take(.recenterGesture, &recenterGesture)
+        take(.padHolds, &padHolds)
         version = (try? c.decode(Int.self, forKey: .version)) ?? 1
     }
 

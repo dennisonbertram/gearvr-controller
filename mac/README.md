@@ -66,6 +66,7 @@ config.toml's 22, and smoothing, the magnet, and battery care exist only here.
 | Volume ± | system volume — hold to keep changing it |
 | Touchpad in Volume mode | slide up and down for smooth system volume |
 | Double-click the trigger, hold the second click | **recenter:** the pointer jumps to the middle of the main screen (turn it off in Settings → Pointer) |
+| Click and hold the touchpad on its top, bottom, left, right or center | **touchpad hotkeys:** each spot runs its own action, e.g. a key combo (set them in Settings → Touchpad; off until you assign one) |
 | Trigger + touch bottom of pad | **clutch:** freeze the cursor while you re-home your hand, release the trigger to resume |
 | Near a button | **magnetic buttons:** buttons are slightly sticky, so arm wobble doesn't knock the pointer off them |
 

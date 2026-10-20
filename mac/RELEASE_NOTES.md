@@ -1,8 +1,14 @@
+## What's new in 1.9.0
+
+* **Touchpad hotkeys:** click the touchpad on the top, bottom, left, right or center
+  and keep it pressed for half a second, and that spot runs its own action: a key
+  combo, media key, click or shell command (Settings → Touchpad → Click and hold the
+  touchpad). A quick click is still a normal touchpad click.
+* **Recenter:** double-click the trigger and keep holding the second click to put the
+  pointer back in the middle of the main screen.
+
 ## What's new in 1.8.0
 
-* **Recenter:** lost the pointer? Double-click the trigger and keep holding the
-  second click, and it jumps to the middle of the main screen. A quick double-click
-  is still a double-click. You can turn it off in Settings → Pointer.
 * **Battery care that works:** earlier versions never let the controller sleep. They
   disconnected it and then reconnected half a second later, while it was still
   advertising, which woke it straight back up. Now, after the idle time or when your

@@ -185,12 +185,15 @@ public final class InputMapper {
     private var lastTriggerTap = -Double.infinity
     private var secondPress: (since: TimeInterval, moved: SIMD2<Double>)? // held back: double-click or recenter?
     private var recentered = false // the trigger's release belongs to the recenter gesture
+    private var padPress: (since: TimeInterval, spot: String)? // held back: a click, or a hold for that spot?
+    private var padHeld = false // the touchpad's release belongs to a spot hold
 
     static let swipeMaxS = 0.45
     static let swipeMinDist = 70
     static let tapMaxDist = 20
     static let doubleTapS = 0.4
     static let recenterHoldS = 0.5
+    static let padHoldS = 0.5
 
     public init(config: RemoteConfig, sink: InputSink, now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
         self.config = config
@@ -204,6 +207,7 @@ public final class InputMapper {
         handleButtons(p)
         checkClutch(p.touch)
         checkRecenter()
+        checkPadHold()
         repeatHeldAction()
         handleMotion(p)
         handleTouch(p)
@@ -225,6 +229,8 @@ public final class InputMapper {
         touchClicked = false
         secondPress = nil
         recentered = false
+        padPress = nil
+        padHeld = false
         lastTriggerTap = -.infinity
         smoothYaw.reset()
         smoothPitch.reset()
@@ -356,6 +362,7 @@ public final class InputMapper {
             if isDown { freezeUntil = now() + config.clickFreezeMS / 1000 }
             if isDown && name == .touchpad && p.touch.touching { touchClicked = true }
             if name == .trigger && config.recenterGesture && interceptTrigger(down: isDown) { continue }
+            if name == .touchpad && interceptPadClick(down: isDown, at: p.touch) { continue }
             press(name, down: isDown)
         }
         prevButtons = p.buttons
@@ -376,6 +383,49 @@ public final class InputMapper {
             } else if !isDown, repeating?.button == name {
                 repeating = nil
             }
+        }
+    }
+
+    // MARK: touchpad spot holds (click and hold top, bottom, left, right or center)
+
+    /// Which part of the pad a touch is on: the middle fifth of the radius is the center.
+    static func padSpot(_ t: Touch) -> String {
+        let c = GearVR.touchMax / 2
+        let dx = Double(t.x) - c, dy = Double(t.y) - c
+        guard t.touching, hypot(dx, dy) > c * 0.4 else { return "center" }
+        return abs(dx) > abs(dy) ? (dx > 0 ? "right" : "left") : (dy > 0 ? "bottom" : "top")
+    }
+
+    private var padHoldsInUse: Bool {
+        config.clutchButton != .touchpad && config.padHolds.values.contains { Action($0) != .none }
+    }
+
+    /// Holds back a touchpad click until it's clear whether it's a click or a hold.
+    /// Returns true when the event was taken.
+    private func interceptPadClick(down: Bool, at t: Touch) -> Bool {
+        if down {
+            guard padHoldsInUse, !clutched else { return false }
+            padPress = (now(), Self.padSpot(t))
+            return true
+        }
+        if padHeld { padHeld = false; return true }
+        if padPress != nil { // let go quickly: the usual touchpad click
+            padPress = nil
+            tap(config.action(for: .touchpad))
+            return true
+        }
+        return false
+    }
+
+    private func checkPadHold() {
+        guard let pp = padPress, now() - pp.since >= Self.padHoldS else { return }
+        padPress = nil
+        let action = Action(config.padHolds[pp.spot] ?? "none")
+        if action == .none {
+            press(.touchpad, down: true) // nothing for this spot: an ordinary held click
+        } else {
+            padHeld = true
+            tap(action)
         }
     }
 
