@@ -25,9 +25,8 @@ from gearvr import Controller
 
 VIEWER_DIR = Path(__file__).parent / "viewer"
 PORT = 8765
-# Pages allowed to open /ws: this server's own viewer and the hosted copy. Without
-# the check any website open in the browser could read the controller stream.
-HOSTED_ORIGIN = "https://dennisonbertram.github.io"
+# Only this server's own viewer may open /ws. Without the check any website open in
+# the browser could read the controller stream (the hosted viewer uses Web Bluetooth).
 
 
 class ViewerServer:
@@ -47,7 +46,7 @@ class ViewerServer:
         if request.path == "/ws":
             origin = request.headers.get("Origin")
             local = {f"http://localhost:{self.port}", f"http://127.0.0.1:{self.port}"}
-            if origin is not None and origin not in local and origin != HOSTED_ORIGIN:
+            if origin is not None and origin not in local:
                 return connection.respond(HTTPStatus.FORBIDDEN, "bad origin\n")
             return None  # proceed with the WebSocket handshake
         rel = request.path.split("?")[0].lstrip("/") or "index.html"

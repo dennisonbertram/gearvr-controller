@@ -36,19 +36,24 @@ enum SystemAudio {
         return levels(device).map(\.value).max()
     }
 
+    private static var balance: [Double]? // per-channel level relative to the louder one
+
     @discardableResult
     static func setVolume(_ level: Double) -> Bool {
         guard let device else { return false }
         let level = min(max(level, 0), 1)
         let current = levels(device)
         let top = current.map(\.value).max() ?? 0
+        // scale the channels together so the balance set in Sound settings survives,
+        // remembering it across a slide down to silence
+        if top > 0.001, current.count > 1 { balance = current.map { $0.value / top } }
+        let ratios = current.count > 1 && balance?.count == current.count ? balance! : current.map { _ in 1.0 }
         let size = UInt32(MemoryLayout<Float32>.size)
         var ok = false
-        for (var address, old) in current {
+        for (i, (var address, _)) in current.enumerated() {
             var settable = DarwinBoolean(false)
             guard AudioObjectIsPropertySettable(device, &address, &settable) == noErr, settable.boolValue else { continue }
-            // scale the channels together so the balance set in Sound settings survives
-            var value = Float32(top > 0.001 ? old * level / top : level)
+            var value = Float32(ratios[i] * level)
             if AudioObjectSetPropertyData(device, &address, 0, nil, size, &value) == noErr { ok = true }
         }
         if ok { unmuteIfNeeded(device) }

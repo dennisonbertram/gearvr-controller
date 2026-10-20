@@ -96,7 +96,8 @@ final class EventSink: InputSink {
     }
 
     private var held: Set<MouseButton> = []
-    private var heldKeys: Set<String> = [], heldMedia: Set<String> = []
+    // keycodes are remembered so the key-up matches even if the layout changes while held
+    private var heldKeys: [String: (CGKeyCode, CGEventFlags)] = [:], heldMedia: Set<String> = []
     private var virtual: CGPoint? // sub-pixel pointer position we drive
     private var lastPosted: CGPoint?
     private var recentPosts: [(time: TimeInterval, point: CGPoint)] = [] // for telling our lag from real moves
@@ -242,10 +243,10 @@ final class EventSink: InputSink {
     }
 
     func key(_ combo: String, down: Bool) {
-        guard let (code, flags) = KeyCombo.parse(combo) else { return }
+        guard let (code, flags) = (down ? nil : heldKeys[combo]) ?? KeyCombo.parse(combo) else { return }
         let e = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: down)
         if !flags.isEmpty { e?.flags = flags }
-        if down { heldKeys.insert(combo) } else { heldKeys.remove(combo) }
+        if down { heldKeys[combo] = (code, flags) } else { heldKeys[combo] = nil }
         log?("key \(combo) \(down ? "down" : "up")")
         post(e)
     }
@@ -312,7 +313,7 @@ final class EventSink: InputSink {
 
     func releaseAll() {
         for b in held { mouseButton(b, down: false) }
-        for k in heldKeys { key(k, down: false) }
+        for k in heldKeys.keys { key(k, down: false) }
         for m in heldMedia { media(m, down: false) }
     }
 }

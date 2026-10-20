@@ -242,7 +242,8 @@ final class ControllerLink: NSObject, CBCentralManagerDelegate, CBPeripheralDele
         guard c.uuid == dataUUID, let value = c.value else { return }
         if value.count == 2 {
             log?("ack \(value.map { String(format: "%02x", $0) }.joined())")
-            if awaitingAck { startStream() }
+            // only the VR-mode echo counts: a late 0000 ack from a rate switch must not start the stream early
+            if awaitingAck, value == GearVR.Command.vrMode.bytes { startStream() }
         } else if let packet = Packet.parse(value) {
             lastPacket = Date()
             onPacket?(packet)

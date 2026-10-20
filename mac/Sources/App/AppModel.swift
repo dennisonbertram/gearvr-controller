@@ -123,12 +123,15 @@ final class AppModel: ObservableObject {
         }
         link.onState = { [weak self] state in
             guard let self else { return }
+            let wasActive = [.handshaking, .streaming, .lowPower].contains(self.linkState)
             self.linkState = state
             self.deviceName = self.link.deviceName
             self.log("state: \(state)")
-            // connecting (e.g. woken with Home) restarts the idle countdown, or the stale
-            // clock would put it straight back to sleep
-            if state == .connecting { self.lastActivity = ProcessInfo.processInfo.systemUptime }
+            // a (re)connection, e.g. woken with Home, restarts the idle countdown, or the stale
+            // clock would put it straight back to sleep; a pending connect can take any time
+            if state == .connecting || (!wasActive && [.handshaking, .streaming].contains(state)) {
+                self.lastActivity = ProcessInfo.processInfo.systemUptime
+            }
             self.updateMagnet()
         }
         link.onDisconnect = { [weak self] in
