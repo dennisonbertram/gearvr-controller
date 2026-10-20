@@ -121,17 +121,24 @@ function recenter() {
   yawOffset.setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI / 2 - heading);
 }
 
+// Each use() call gets a generation; events from a replaced source are ignored.
+let useGen = 0, fallbackTimer = null;
+
 async function use(kind) {
+  const gen = ++useGen;
+  clearTimeout(fallbackTimer);
   source?.disconnect();
   fusion.reset();
   recenterPending = true;
   connected = false;
   isDemo = kind === 'demo';
   const handlers = {
-    onPacket,
+    onPacket: (pkt) => { if (gen === useGen) onPacket(pkt); },
     onStatus: (text) => {
+      if (gen !== useGen) return;
       connected = /streaming/.test(text) || kind === 'demo';
       setStatus(text, /streaming/.test(text));
+      if (!connected) model.setState(null, false); // don't leave stale buttons and a lit LED
     },
   };
   source = kind === 'bluetooth' ? new BluetoothSource(handlers)
@@ -139,12 +146,17 @@ async function use(kind) {
   try {
     await source.connect();
   } catch (err) {
-    const busy = kind === 'bluetooth' && err.name === 'NotFoundError';
-    setStatus(busy
-      ? 'no controller found: quit remote.py / bridge.py (it allows one connection), wake it with HOME, retry'
+    if (gen !== useGen) return; // replaced while connecting
+    const cancelled = kind === 'bluetooth' && /cancel/i.test(err.message);
+    const busy = kind === 'bluetooth' && err.name === 'NotFoundError' && !cancelled;
+    setStatus(cancelled ? 'connection cancelled'
+      : busy ? 'no controller found: quit remote.py / bridge.py (it allows one connection), wake it with HOME, retry'
       : kind === 'bridge' ? 'bridge not running: start remote.py --viewer or bridge.py'
       : `${kind}: ${err.message || err}`);
-    if (kind !== 'demo') setTimeout(() => { if (!latest || !connected) use('demo'); }, 2500);
+    model.setState(null, false);
+    if (kind !== 'demo') {
+      fallbackTimer = setTimeout(() => { if (gen === useGen && (!latest || !connected)) use('demo'); }, 2500);
+    }
   }
 }
 

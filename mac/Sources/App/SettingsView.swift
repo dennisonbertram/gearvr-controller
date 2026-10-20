@@ -19,6 +19,7 @@ struct SettingsView: View {
         .frame(width: 540)
         .frame(minHeight: 560)
         .padding(.vertical, 6)
+        .onAppear { model.refreshLaunchAtLogin() } // it may have changed in Login Items
     }
 }
 
@@ -68,18 +69,18 @@ struct WelcomeTab: View {
                                                             : "Needed to move the pointer and click.") {
                     if !model.accessibilityTrusted { Button("Open Settings…") { model.openAccessibilitySettings() } }
                 }
-                CheckRow(done: model.isStreaming, title: "Controller connected",
-                         detail: model.isStreaming ? (model.deviceName ?? "Connected") : "Press Home on the controller to wake it.")
-                Toggle("Start GearVR Remote when you log in",
-                       isOn: Binding(get: { model.launchAtLogin }, set: { model.setLaunchAtLogin($0) }))
+                CheckRow(done: model.isConnected, title: "Controller connected",
+                         detail: model.isConnected ? (model.deviceName ?? "Connected") : "Press Home on the controller to wake it.")
+                LaunchAtLoginRow()
             }
             Section("Controls") {
                 ForEach([("Point & turn", "move the pointer"),
                          ("Trigger", "click · hold and move to drag"),
                          ("Touchpad", "slide to scroll · click to right-click"),
                          ("Home", "air mouse on/off"),
+                         ("Double-click trigger, hold", "pointer back to the middle of the screen"),
                          ("Trigger + touch bottom of pad", "freeze the pointer while you re-grip"),
-                         ("Slow down near a button", "the pointer snaps onto it (magnetic buttons)"),
+                         ("Hover over a button", "it gets a little sticky, which steadies your aim"),
                          ("Back · Volume ±", "Escape · system volume")], id: \.0) { control, action in
                     LabeledContent(control) { Text(action).foregroundStyle(.secondary) }
                 }
@@ -149,6 +150,8 @@ struct PointerTab: View {
                     .help("Evens out small wobbles. It adapts to speed: steadier when you move slowly, quick when you move fast. 0% turns it off.")
                 SliderRow(title: "Dead zone", value: $model.config.deadzoneDPS, range: 0...5, format: "%.1f °/s")
                 SliderRow(title: "Click steadying", value: $model.config.clickFreezeMS, range: 0...400, format: "%.0f ms")
+                Toggle("Double-click and hold the trigger to recenter", isOn: $model.config.recenterGesture)
+                    .help("Lost the pointer? Double-click the trigger and keep holding the second click: the pointer jumps to the middle of the main screen.")
             }
             Section {
                 Toggle("Snap the pointer onto buttons", isOn: $model.config.magnetEnabled)
@@ -163,6 +166,13 @@ struct PointerTab: View {
                 LabeledContent("Not sure what suits you?") {
                     Button("Start training…") { model.showTraining() }
                 }
+                LabeledContent("Pointer drifting on its own?") {
+                    Button("Recalibrate gyro…") { model.showCalibration() }
+                }
+                Text("Point and turn the controller to move the cursor. Turning is measured around the real vertical, so it works however you roll your wrist. When it connects, set the controller down for a second so it can calibrate the gyro. Smoothing adapts to speed: it steadies slow, careful movement and stays out of the way when you move fast.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
                 Picker("Sleep the controller after", selection: $model.config.sleepAfterMinutes) {
                     Text("1 minute").tag(1.0)
                     Text("3 minutes").tag(3.0)
@@ -170,11 +180,13 @@ struct PointerTab: View {
                     Text("15 minutes").tag(15.0)
                     Text("Never").tag(0.0)
                 }
-                .help("With nothing happening, the controller is put to sleep so its AAA batteries last. Press Home to wake it.")
-                LabeledContent("Pointer drifting on its own?") {
-                    Button("Recalibrate gyro…") { model.showCalibration() }
+                if let level = model.battery, model.isConnected {
+                    LabeledContent("Controller battery") { BatteryBadge(level: level) }
                 }
-                Text("Point and turn the controller to move the cursor. Turning is measured around the real vertical, so it works however you roll your wrist. When it connects, set the controller down for a second so it can calibrate the gyro. Smoothing adapts to speed: it steadies slow, careful movement and stays out of the way when you move fast.")
+            } header: {
+                Text("Battery care")
+            } footer: {
+                Text("The controller stays awake while an app streams from it, so after this long with nothing happening, or as soon as your Mac sleeps or locks, GearVR Remote switches its sensors off and lets go of it, and the controller falls asleep a couple of minutes later. Press Home (or Wake in the menu) to bring it back. Turning off Control this Mac switches its sensors off, and the fast 68 packets/s stream runs only while the air mouse is on (30 otherwise).")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -249,7 +261,7 @@ struct GeneralTab: View {
     var body: some View {
         Form {
             Section {
-                Toggle("Launch at login", isOn: Binding(get: { model.launchAtLogin }, set: { model.setLaunchAtLogin($0) }))
+                LaunchAtLoginRow()
                 Toggle("Always show in the Dock", isOn: $model.config.alwaysShowInDock)
                     .help("GearVR Remote lives in the menu bar. Turn this on to keep a Dock icon as well, so you can launch and reopen it like any other app.")
                 LabeledContent("Accessibility") {
@@ -274,6 +286,22 @@ struct GeneralTab: View {
 }
 
 // MARK: shared controls
+
+/// The login item toggle, plus why it's still off when macOS wants approval or refused it.
+struct LaunchAtLoginRow: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        Toggle("Start when you log in", isOn: Binding(get: { model.launchAtLogin }, set: { model.setLaunchAtLogin($0) }))
+        if let note = model.launchAtLoginNote {
+            HStack {
+                Text(note).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                Spacer()
+                Button("Open Login Items…") { model.openLoginItemsSettings() }.controlSize(.small)
+            }
+        }
+    }
+}
 
 struct MagnetStrengthRow: View {
     @Binding var strength: Double
@@ -361,27 +389,32 @@ struct ActionEditor: View {
                     ForEach(Kind.allCases) { Text($0.rawValue).tag($0) }
                 }
                 .labelsHidden()
-                .frame(width: 150)
-                switch kind {
-                case .key:
-                    TextField("", text: Binding(get: { argument }, set: { set(.key, $0) }), prompt: Text("cmd+shift+["))
-                        .labelsHidden()
-                        .frame(width: 130)
-                        .foregroundStyle(KeyCombo.parse(argument) == nil ? Color.red : .primary)
-                        .help("Modifiers cmd, shift, alt/option, ctrl, fn joined with + and a key: a–z, 0–9, left, right, up, down, space, return, escape, tab, delete, f1–f12, pageup, pagedown, home, end, or punctuation.")
-                case .media:
-                    Picker("", selection: Binding(get: { argument }, set: { set(.media, $0) })) {
-                        ForEach(MediaKey.names, id: \.self) { Text($0.replacingOccurrences(of: "_", with: " ")).tag($0) }
+                .fixedSize()
+                .frame(width: 150, alignment: .trailing)
+                // one fixed, trailing-aligned column, so fields and pickers end at the same edge
+                Group {
+                    switch kind {
+                    case .key:
+                        TextField("", text: Binding(get: { argument }, set: { set(.key, $0) }), prompt: Text("cmd+shift+["))
+                            .textFieldStyle(.roundedBorder)
+                            .padding(.trailing, 4) // pop-up pickers draw inset by about this much
+                            .foregroundStyle(KeyCombo.parse(argument) == nil ? Color.red : .primary)
+                            .help("Modifiers cmd, shift, alt/option, ctrl, fn joined with + and a key: a–z, 0–9, left, right, up, down, space, return, escape, tab, delete, f1–f12, pageup, pagedown, home, end, or punctuation.")
+                    case .media:
+                        Picker("", selection: Binding(get: { argument }, set: { set(.media, $0) })) {
+                            ForEach(MediaKey.names, id: \.self) { Text($0.replacingOccurrences(of: "_", with: " ")).tag($0) }
+                        }
+                        .fixedSize()
+                    case .shell:
+                        TextField("", text: Binding(get: { argument }, set: { set(.shell, $0) }), prompt: Text("open -a Safari"))
+                            .textFieldStyle(.roundedBorder)
+                            .padding(.trailing, 4)
+                    default:
+                        Color.clear.frame(height: 1)
                     }
-                    .labelsHidden()
-                    .frame(width: 130)
-                case .shell:
-                    TextField("", text: Binding(get: { argument }, set: { set(.shell, $0) }), prompt: Text("open -a Safari"))
-                        .labelsHidden()
-                        .frame(width: 130)
-                default:
-                    Color.clear.frame(width: 130, height: 1)
                 }
+                .labelsHidden()
+                .frame(width: 130, alignment: .trailing)
             }
         }
     }

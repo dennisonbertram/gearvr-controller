@@ -151,3 +151,41 @@ def test_clutch_disabled_keeps_immediate_press():
 def test_zones(zone, x, y, hit):
     m, _ = make_mapper(zone=zone)
     assert m.in_clutch_zone(touch_at(x, y)) is hit
+
+
+def test_pad_click_in_gestures_mode_is_not_a_tap():
+    m, out = make_mapper()
+    m.cfg["touchpad"]["mode_pointer_on"] = "gestures"
+    m.gestures = {"tap": "key:space"}
+    f = Feed(m)
+    f()
+    f(touch=touch_at(157, 157))
+    f(buttons={"touchpad"}, touch=touch_at(157, 157))
+    f(touch=touch_at(157, 157))  # click released before the finger lifts
+    f()
+    assert ("key", "space", True) not in out.events
+    f(touch=touch_at(157, 157))  # a plain tap still fires
+    f()
+    assert ("key", "space", True) in out.events
+
+
+@pytest.mark.parametrize("table,key,value", [("clutch", "zone", "botom"), ("clutch", "button", "triger"),
+                                             ("touchpad", "mode_pointer_on", "scrol"),
+                                             ("buttons", "vol_up", "none"), ("pointer", "sensitivity", "fast")])
+def test_config_typos_fail_at_startup(table, key, value):
+    m, _ = make_mapper()
+    cfg = {**m.cfg, table: {**m.cfg.get(table, {}), key: value}}
+    with pytest.raises(ValueError, match=key):
+        remote.Mapper(cfg, out=FakeOut())
+
+
+def test_missing_table_fails_at_startup():
+    m, _ = make_mapper()
+    cfg = {k: v for k, v in m.cfg.items() if k != "pointer"}
+    with pytest.raises(ValueError, match=r"\[pointer\]"):
+        remote.Mapper(cfg, out=FakeOut())
+
+
+def test_shipped_config_is_valid():
+    with open("config.toml", "rb") as f:
+        remote.validate_config(remote.tomllib.load(f))

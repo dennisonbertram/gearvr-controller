@@ -6,13 +6,19 @@
 #   ./build.sh install   build, then copy the app to /Applications and launch it
 #   ./build.sh run       build, then launch from $BUILD/
 #   ./build.sh dist      build, then package $BUILD/GearVR-Remote-<version>.dmg for distribution
+#
+# Release signing (all optional; without them the app is signed locally or ad hoc):
+#   SIGN_IDENTITY="Developer ID Application: Name (TEAMID)"  hardened runtime + timestamp
+#   APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD               also notarize and staple the DMG
+#   BUILD_NUMBER                                              CFBundleVersion (default: $VERSION)
 set -euo pipefail
 cd "$(dirname "$0")"
 
 NAME="GearVR Remote"
 EXE="GearVRRemote"
 BUNDLE_ID="com.dennisonbertram.gearvr-remote"
-VERSION="${VERSION:-1.7.0}"
+VERSION="${VERSION:-1.8.0}"
+BUILD_NUMBER="${BUILD_NUMBER:-$VERSION}"
 MIN_OS="14.0"
 # Spotlight skips directories ending in .noindex, so the build output never shows up
 # alongside the installed app when you search for it.
@@ -34,6 +40,29 @@ signing_identity() {
     local id
     id=$(security find-identity -p codesigning 2>/dev/null | awk '/"GearVR Remote Local Signing"/ {print $2; exit}')
     echo "${id:--}"
+}
+
+# A Developer ID signature is stable across releases, so permissions survive updates,
+# and with the hardened runtime and a timestamp it can be notarized.
+is_developer_id() { [[ "$1" == "Developer ID Application:"* ]]; }
+
+notarize() {
+    local file="$1" out id
+    if [ -z "${APPLE_ID:-}" ] || [ -z "${APPLE_TEAM_ID:-}" ] || [ -z "${APPLE_APP_PASSWORD:-}" ]; then
+        echo "not notarizing: set APPLE_ID, APPLE_TEAM_ID and APPLE_APP_PASSWORD"; return
+    fi
+    echo "notarizing $file (this takes a few minutes)..."
+    # notarytool exits 0 even when Apple rejects the upload, so check the status itself.
+    out=$(xcrun notarytool submit "$file" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
+        --password "$APPLE_APP_PASSWORD" --wait --output-format json)
+    if ! grep -q '"status" *: *"Accepted"' <<<"$out"; then
+        echo "notarization failed: $out"
+        id=$(sed -n 's/.*"id" *: *"\([^"]*\)".*/\1/p' <<<"$out")
+        [ -n "$id" ] && xcrun notarytool log "$id" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD"
+        exit 1
+    fi
+    xcrun stapler staple "$file"
 }
 
 make_icon() {
@@ -68,17 +97,28 @@ build_app() {
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>$VERSION</string>
-    <key>CFBundleVersion</key><string>$VERSION</string>
+    <key>CFBundleVersion</key><string>$BUILD_NUMBER</string>
+    <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+    <key>CFBundleDevelopmentRegion</key><string>en</string>
+    <key>NSHumanReadableCopyright</key><string>© 2026 Dennison Bertram. MIT License.</string>
     <key>LSMinimumSystemVersion</key><string>$MIN_OS</string>
     <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSBluetoothAlwaysUsageDescription</key>
     <string>GearVR Remote connects to your Samsung Gear VR Controller over Bluetooth.</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>GearVR Remote runs the shell commands and scripts you assign to controller buttons.</string>
 </dict>
 </plist>
 PLIST
-    codesign --force --sign "$(signing_identity)" --identifier "$BUNDLE_ID" "$APP"
+    local id; id=$(signing_identity)
+    if is_developer_id "$id"; then
+        codesign --force --options runtime --timestamp --entitlements GearVRRemote.entitlements \
+            --sign "$id" --identifier "$BUNDLE_ID" "$APP"
+    else
+        codesign --force --sign "$id" --identifier "$BUNDLE_ID" "$APP"
+    fi
     echo "built $APP"
 }
 
@@ -90,6 +130,11 @@ make_dmg() {
     ln -s /Applications "$stage/Applications"
     hdiutil create -volname "$NAME" -srcfolder "$stage" -ov -format UDZO "$dmg" >/dev/null
     rm -rf "$stage"
+    local id; id=$(signing_identity)
+    if is_developer_id "$id"; then
+        codesign --force --timestamp --sign "$id" "$dmg"
+        notarize "$dmg"
+    fi
     echo "packaged $dmg"
 }
 

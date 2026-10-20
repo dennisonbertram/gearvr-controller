@@ -36,11 +36,21 @@ final class TrainingSession: ObservableObject {
         var pathRatio: Double // pointer travel / straight-line distance (1 = perfect)
         var jitterPX: Double // pointer wobble just before clicking
         var tremorDPS: Double // hand tremor from the gyro just before clicking
+        var controllerData: Bool // the gyro was recording for most of the run
         var suggestions: [Suggestion]
-        var config: RemoteConfig // current settings with the suggestions applied
+        var speed: Double, smooth: Double, magnet: Double, enableMagnet: Bool
+
+        /// Puts only the tuned values onto the live settings, so changes made elsewhere since the run survive.
+        func apply(to cfg: inout RemoteConfig) {
+            cfg.sensitivity = speed
+            cfg.smoothing = smooth
+            cfg.magnetStrength = magnet
+            if enableMagnet { cfg.magnetEnabled = true }
+        }
     }
 
     static let sizes: [CGFloat] = [72, 72, 60, 52, 48, 40, 36, 32, 28, 24, 24, 20, 18, 16, 16]
+    static let speedRange = 6.0...60.0 // the pointer speed slider in Settings and the menu
 
     @Published var phase = Phase.intro
     @Published var index = 0
@@ -142,19 +152,20 @@ final class TrainingSession: ObservableObject {
         var s = Summary(hitRate: firstHits.reduce(0, +) / Double(max(trials.count, 1)),
                         smallHitRate: small.isEmpty ? 1 : Double(small.filter { $0.misses == 0 }.count) / Double(small.count),
                         medianTime: median(times), pathRatio: median(ratios), jitterPX: median(jitters),
-                        tremorDPS: median(tremors), suggestions: [], config: cfg)
+                        tremorDPS: median(tremors), controllerData: tremors.count * 2 >= max(trials.count, 1),
+                        suggestions: [], speed: cfg.sensitivity, smooth: cfg.smoothing, magnet: cfg.magnetStrength,
+                        enableMagnet: false)
 
         // pointer speed: overshooting and zig-zagging means too fast; long straight trips mean too slow
         var speed = cfg.sensitivity
         var speedReason = "Your paths to the targets were direct, so the speed suits you."
         if s.pathRatio > 1.6 {
-            speed = (cfg.sensitivity * 0.85).rounded()
+            speed = max((cfg.sensitivity * 0.85).rounded(), min(cfg.sensitivity, Self.speedRange.lowerBound))
             speedReason = String(format: "The pointer travelled %.1f× the straight distance, so you tended to overshoot. A little slower should help.", s.pathRatio)
         } else if s.pathRatio < 1.2 && s.medianTime > 1.4 {
-            speed = (cfg.sensitivity * 1.15).rounded()
+            speed = min((cfg.sensitivity * 1.15).rounded(), max(cfg.sensitivity, Self.speedRange.upperBound))
             speedReason = String(format: "Paths were direct but took %.1f s on average; a little faster saves arm movement.", s.medianTime)
         }
-        speed = min(max(speed, 8), 50)
 
         // smoothing follows your measured hand tremor while aiming
         var smooth: Double
@@ -166,8 +177,16 @@ final class TrainingSession: ObservableObject {
         default: smooth = 0.75
         }
         if s.jitterPX > 5 { smooth = min(smooth + 0.1, 0.9) }
-        let smoothReason = String(format: "While aiming your hand moved %.1f°/s on average and the pointer wobbled about %.0f px.",
+        var smoothReason = String(format: "While aiming your hand moved %.1f°/s on average and the pointer wobbled about %.0f px.",
                                   s.tremorDPS, s.jitterPX)
+        // without gyro data (pointer off, not yet calibrated, or the controller dropped out) the run
+        // says nothing about your hand, and the paths may have come from the trackpad
+        if !s.controllerData {
+            speed = cfg.sensitivity
+            smooth = cfg.smoothing
+            speedReason = "Not enough controller data: the gyro wasn't recording for most of the run."
+            smoothReason = speedReason
+        }
 
         // magnet: more help if small targets were hard to hit first time
         var magnet = cfg.magnetStrength
@@ -177,6 +196,7 @@ final class TrainingSession: ObservableObject {
         case ..<0.85: magnet = max(magnet, 0.4)
         default: break
         }
+        let enableMagnet = s.smallHitRate < 0.85 && !cfg.magnetEnabled
         let magnetReason = String(format: "You hit %.0f%% of the small targets on the first click.", s.smallHitRate * 100)
 
         func pct(_ v: Double) -> String { String(format: "%.0f%%", v * 100) }
@@ -185,14 +205,15 @@ final class TrainingSession: ObservableObject {
                        suggested: String(format: "%.0f", speed), reason: speedReason, changed: speed != cfg.sensitivity),
             Suggestion(id: "smooth", title: "Smoothing", current: pct(cfg.smoothing), suggested: pct(smooth),
                        reason: smoothReason, changed: abs(smooth - cfg.smoothing) > 0.01),
-            Suggestion(id: "magnet", title: "Magnet strength", current: pct(cfg.magnetStrength), suggested: pct(magnet),
+            Suggestion(id: "magnet", title: "Magnet strength", current: cfg.magnetEnabled ? pct(cfg.magnetStrength) : "Off",
+                       suggested: pct(magnet),
                        reason: magnetReason + (magnet > MagnetSettings.snapThreshold ? " Above the middle it snaps onto buttons." : ""),
-                       changed: abs(magnet - cfg.magnetStrength) > 0.01 || (!cfg.magnetEnabled && magnet > 0)),
+                       changed: abs(magnet - cfg.magnetStrength) > 0.01 || enableMagnet),
         ]
-        s.config.sensitivity = speed
-        s.config.smoothing = smooth
-        s.config.magnetStrength = magnet
-        if magnet > cfg.magnetStrength { s.config.magnetEnabled = true }
+        s.speed = speed
+        s.smooth = smooth
+        s.magnet = magnet
+        s.enableMagnet = enableMagnet
         return s
     }
 }
@@ -226,16 +247,24 @@ struct TrainingView: View {
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: 520)
-            if !model.isStreaming {
-                Label("Connect the controller first (press Home).", systemImage: "exclamationmark.triangle.fill")
+            if let problem = notReady {
+                Label(problem, systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)
             }
             Button("Start") { session.begin() }
                 .controlSize(.large)
                 .keyboardShortcut(.defaultAction)
-                .disabled(!model.isStreaming)
+                .disabled(notReady != nil)
         }
         .padding(40)
+    }
+
+    /// Training measures the air mouse, so it needs the pointer on and the gyro calibrated.
+    private var notReady: String? {
+        if !model.isStreaming { return "Connect the controller first (press Home)." }
+        if !model.pointerOn { return "Turn the pointer on first." }
+        if !model.gyroCalibrated { return "Hold the controller still for a moment to calibrate." }
+        return nil
     }
 
     private var running: some View {
@@ -273,6 +302,7 @@ struct TrainingView: View {
         .onContinuousHover(coordinateSpace: .local) { phase in
             if case .active(let p) = phase { session.hover(p) }
         }
+        .onChange(of: model.isStreaming) { _, streaming in if !streaming { session.phase = .intro } }
     }
 
     private var results: some View {
@@ -284,7 +314,7 @@ struct TrainingView: View {
                 stat("Small targets", String(format: "%.0f%%", s.smallHitRate * 100))
                 stat("Time per target", String(format: "%.1f s", s.medianTime))
                 stat("Path directness", String(format: "%.1f×", s.pathRatio))
-                stat("Hand tremor", String(format: "%.1f°/s", s.tremorDPS))
+                stat("Hand tremor", s.controllerData ? String(format: "%.1f°/s", s.tremorDPS) : "—")
             }
             VStack(alignment: .leading, spacing: 10) {
                 Text("Suggested settings").font(.title3.weight(.semibold))
@@ -302,7 +332,7 @@ struct TrainingView: View {
             }
             HStack {
                 Button("Apply suggestions") {
-                    model.config = s.config
+                    s.apply(to: &model.config)
                     close()
                 }
                 .controlSize(.large)

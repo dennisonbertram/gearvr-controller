@@ -17,7 +17,15 @@ final class ControllerLink: NSObject, CBCentralManagerDelegate, CBPeripheralDele
     /// High rate (~68 pkt/s) for pointing; the plain sensor stream (~30 pkt/s) is enough
     /// for buttons and scrolling and asks less of the controller's batteries.
     var wantsHighRate = true {
-        didSet { if wantsHighRate != oldValue, state == .streaming { beginHandshake() } }
+        didSet {
+            // a change mid-handshake restarts it, or the old rate would stick
+            if wantsHighRate != oldValue, state == .streaming || state == .handshaking { beginHandshake() }
+        }
+    }
+    /// While asleep, reconnect as soon as the controller advertises (press Home). Off while the
+    /// Mac is asleep or locked, so a stray wake isn't connected only to be put back to sleep.
+    var wakeOnHome = true {
+        didSet { if wakeOnHome, !oldValue { armWake() } }
     }
 
     private(set) var state = State.searching { didSet { if state != oldValue { onState?(state) } } }
@@ -30,6 +38,9 @@ final class ControllerLink: NSObject, CBCentralManagerDelegate, CBPeripheralDele
     private var ackTimeout: Timer?
     private var watchdog: Timer?
     private var awaitingAck = false
+    /// Bumped whenever the stream setup changes, so stale delayed steps do nothing.
+    private var generation = 0
+    private var scanTimeout: Timer?
     private var lastPacket = Date.distantPast
 
     private let serviceUUID = CBUUID(string: GearVR.serviceUUID)
@@ -57,9 +68,22 @@ final class ControllerLink: NSObject, CBCentralManagerDelegate, CBPeripheralDele
            let p = central.retrievePeripherals(withIdentifiers: [id]).first {
             log?("waiting for known controller \(id)")
             connect(p)
+            // the pending connect is enough from here on and costs nothing while it waits;
+            // scan briefly only in case the controller has a new identity
+            scanTimeout?.invalidate()
+            scanTimeout = Timer.scheduledTimer(withTimeInterval: 30, repeats: false) { [weak self] _ in
+                self?.log?("scan timed out; waiting on the pending connect")
+                self?.stopScan()
+            }
         }
         // 3. Scan. The controller doesn't advertise its service UUID, so match by name.
         central.scanForPeripherals(withServices: nil, options: nil)
+    }
+
+    private func stopScan() {
+        scanTimeout?.invalidate()
+        scanTimeout = nil
+        if central.state == .poweredOn { central.stopScan() }
     }
 
     private func connect(_ p: CBPeripheral) {
@@ -73,10 +97,13 @@ final class ControllerLink: NSObject, CBCentralManagerDelegate, CBPeripheralDele
         log?("bluetooth state \(c.state.rawValue), authorization \(CBManager.authorization.rawValue)")
         switch c.state {
         case .poweredOn: findController()
-        case .unauthorized: state = .unauthorized
         default:
+            // no didDisconnect arrives when the radio goes away, so release held input here
+            stopScan()
             teardown()
-            state = .bluetoothOff
+            peripheral = nil
+            onDisconnect?()
+            state = c.state == .unauthorized ? .unauthorized : .bluetoothOff
         }
     }
 
@@ -85,14 +112,14 @@ final class ControllerLink: NSObject, CBCentralManagerDelegate, CBPeripheralDele
         let name = advertisementData[CBAdvertisementDataLocalNameKey] as? String ?? p.name ?? ""
         guard name.hasPrefix(GearVR.namePrefix) else { return }
         log?("discovered \(name) rssi \(rssi)")
-        central.stopScan()
+        stopScan()
         deviceName = name
         connect(p)
     }
 
     func centralManager(_ c: CBCentralManager, didConnect p: CBPeripheral) {
         log?("connected")
-        central.stopScan()
+        stopScan()
         deviceName = p.name ?? deviceName
         UserDefaults.standard.set(p.identifier.uuidString, forKey: savedIDKey)
         state = .connecting
@@ -111,7 +138,7 @@ final class ControllerLink: NSObject, CBCentralManagerDelegate, CBPeripheralDele
         onDisconnect?()
         if sleeping {
             state = .asleep
-            central.connect(p, options: nil) // wake on the next advertisement
+            armWake()
         } else {
             retryLater()
         }
@@ -123,6 +150,7 @@ final class ControllerLink: NSObject, CBCentralManagerDelegate, CBPeripheralDele
     }
 
     private func teardown() {
+        generation += 1
         keepAlive?.invalidate()
         ackTimeout?.invalidate()
         watchdog?.invalidate()
@@ -162,23 +190,31 @@ final class ControllerLink: NSObject, CBCentralManagerDelegate, CBPeripheralDele
     /// 0800 (VR mode, ~1.5 s to ack) -> wait for the 2-byte echo -> 0100 (start streaming).
     /// Without the VR-mode step the controller streams at the slower sensor rate.
     private func beginHandshake() {
+        generation += 1
+        let gen = generation
+        ackTimeout?.invalidate()
+        awaitingAck = false
         guard wantsHighRate else {
             // VR mode sticks until the sensors are switched off, so drop it first
             send(.off)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in self?.startStream() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                guard let self, self.generation == gen else { return }
+                self.startStream()
+            }
             return
         }
         state = .handshaking
         awaitingAck = true
         send(.vrMode)
-        ackTimeout?.invalidate()
         ackTimeout = Timer.scheduledTimer(withTimeInterval: 4, repeats: false) { [weak self] _ in
-            self?.log?("no VR-mode ack; starting anyway")
-            self?.startStream()
+            guard let self, self.generation == gen else { return }
+            self.log?("no VR-mode ack; starting anyway")
+            self.startStream()
         }
     }
 
     private func startStream() {
+        guard peripheral != nil, cmdChar != nil else { return }
         awaitingAck = false
         ackTimeout?.invalidate()
         send(.sensor)
@@ -206,7 +242,8 @@ final class ControllerLink: NSObject, CBCentralManagerDelegate, CBPeripheralDele
         guard c.uuid == dataUUID, let value = c.value else { return }
         if value.count == 2 {
             log?("ack \(value.map { String(format: "%02x", $0) }.joined())")
-            if awaitingAck { startStream() }
+            // only the VR-mode echo counts: a late 0000 ack from a rate switch must not start the stream early
+            if awaitingAck, value == GearVR.Command.vrMode.bytes { startStream() }
         } else if let packet = Packet.parse(value) {
             lastPacket = Date()
             onPacket?(packet)
@@ -220,6 +257,7 @@ final class ControllerLink: NSObject, CBCentralManagerDelegate, CBPeripheralDele
         guard peripheral != nil, cmdChar != nil else { return }
         if on {
             guard state == .streaming else { return }
+            generation += 1 // drop a pending low-rate restart
             keepAlive?.invalidate()
             watchdog?.invalidate()
             send(.off)
@@ -233,17 +271,45 @@ final class ControllerLink: NSObject, CBCentralManagerDelegate, CBPeripheralDele
 
     /// Sensors off and disconnected, so the controller can fall asleep on its own.
     /// A pending connect brings it back the moment it advertises again (press Home).
+    /// Lets the controller fall asleep. It never sleeps while connected, even with its sensors
+    /// off, and after a disconnect it keeps advertising for about 2.5 minutes before sleeping.
+    /// Reconnecting in that window wakes it straight back up, so the pending connect that
+    /// catches Home is only armed once it has had time to fall asleep.
     func sleepNow() {
-        guard let p = peripheral, state != .asleep else { return }
+        guard central.state == .poweredOn, let p = peripheral,
+              [.connecting, .handshaking, .streaming, .lowPower].contains(state) else { return }
         log?("putting the controller to sleep")
         if cmdChar != nil { send(.off) }
+        stopScan()
         teardown()
-        central.cancelPeripheralConnection(p)
         state = .asleep
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+        asleepSince = Date()
+        // let the 0000 write go out before dropping the link
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
             guard let self, self.state == .asleep, let p = self.peripheral else { return }
-            self.central.connect(p, options: nil) // completes when it wakes up
+            self.central.cancelPeripheralConnection(p)
         }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.fallAsleepS) { [weak self] in self?.armWake() }
+    }
+
+    static let fallAsleepS: TimeInterval = 210
+    private var asleepSince = Date.distantPast
+
+    /// Reconnects now, e.g. from the menu or when you're back at the Mac. While the controller
+    /// is still awake this connects at once; once it's asleep it connects when Home is pressed.
+    func wake() {
+        guard state == .asleep, central.state == .poweredOn, let p = peripheral else { return }
+        log?("waking the controller")
+        asleepSince = .distantPast
+        central.connect(p, options: nil)
+    }
+
+    /// A pending connect completes the moment the controller wakes up and advertises.
+    private func armWake() {
+        guard wakeOnHome, state == .asleep, central.state == .poweredOn, let p = peripheral,
+              Date().timeIntervalSince(asleepSince) >= Self.fallAsleepS else { return }
+        log?("waiting for Home")
+        central.connect(p, options: nil)
     }
 
     var isAsleep: Bool { state == .asleep }

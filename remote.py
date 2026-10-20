@@ -11,8 +11,13 @@ import math
 import subprocess
 import sys
 import time
-import tomllib
 from collections import deque
+
+if sys.version_info < (3, 11):  # tomllib; macOS's /usr/bin/python3 is 3.9
+    sys.exit(f"remote.py needs Python 3.11+, this is {sys.version.split()[0]} "
+             "(try: brew install python@3.12)")
+
+import tomllib  # noqa: E402
 
 from gearvr import BUTTON_BITS, TOUCH_MAX, Controller, Packet, Touch
 from macos_input import MEDIA_KEYS, Output, accessibility_ok, parse_combo
@@ -20,9 +25,14 @@ from macos_input import MEDIA_KEYS, Output, accessibility_ok, parse_combo
 SWIPE_MAX_S = 0.45
 SWIPE_MIN_DIST = 70  # touchpad units (pad is ~315 across)
 TAP_MAX_DIST = 20
+TOUCH_MODES = {"cursor", "scroll", "gestures"}
+GESTURES = {"swipe_left", "swipe_right", "swipe_up", "swipe_down", "tap"}
+CLUTCH_ZONES = {"bottom", "top", "left", "right", "any"}
 
 
 def validate_action(action: str) -> None:
+    if not isinstance(action, str):
+        raise ValueError(f"action {action!r} must be a string")
     kind, _, arg = action.partition(":")
     if kind == "key":
         parse_combo(arg)
@@ -31,6 +41,39 @@ def validate_action(action: str) -> None:
     elif kind not in {"key", "media", "shell", "left_click", "right_click",
                       "middle_click", "toggle_pointer", "none"}:
         raise ValueError(f"unknown action {action!r}")
+
+
+def validate_config(cfg: dict) -> None:
+    """Raise ValueError naming the first bad setting, so a typo fails at startup."""
+    for table in ("buttons", "pointer", "touchpad"):
+        if not isinstance(cfg.get(table), dict):
+            raise ValueError(f"missing [{table}] table")
+    for table, names in (("buttons", BUTTON_BITS), ("gestures", GESTURES)):
+        for name, action in cfg.get(table, {}).items():
+            if name not in names:
+                raise ValueError(f"unknown name {name!r} in [{table}]")
+            validate_action(action)
+
+    def check(table: str, key: str, ok, what: str, default=None) -> None:
+        value = cfg.get(table, {}).get(key, default)
+        if not ok(value):
+            raise ValueError(f"[{table}] {key} = {value!r}: expected {what}")
+
+    def number(v) -> bool:
+        return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+    for key in ("sensitivity", "deadzone_dps", "click_freeze_ms"):
+        check("pointer", key, number, "a number")
+    for key in ("cursor_speed", "scroll_speed"):
+        check("touchpad", key, number, "a number")
+    for key in ("mode_pointer_on", "mode_pointer_off"):
+        check("touchpad", key, TOUCH_MODES.__contains__, " | ".join(sorted(TOUCH_MODES)))
+    check("pointer", "enabled", lambda v: isinstance(v, bool), "true or false")
+    check("touchpad", "invert_scroll", lambda v: isinstance(v, bool), "true or false")
+    check("clutch", "button", BUTTON_BITS.__contains__, " | ".join(BUTTON_BITS), "trigger")
+    check("clutch", "zone", CLUTCH_ZONES.__contains__, " | ".join(sorted(CLUTCH_ZONES)), "bottom")
+    check("clutch", "zone_size", number, "a number", 0.35)
+    check("clutch", "drag_threshold_px", number, "a number", 12)
 
 
 class GyroBias:
@@ -63,11 +106,10 @@ class GyroBias:
 class Mapper:
     def __init__(self, cfg: dict, out=None):
         self.cfg = cfg
+        validate_config(cfg)
         self.out = out or Output()
         self.buttons = cfg["buttons"]
         self.gestures = cfg.get("gestures", {})
-        for action in [*self.buttons.values(), *self.gestures.values()]:
-            validate_action(action)
         self.pointer_on = cfg["pointer"]["enabled"]
         self.prev_buttons: frozenset[str] = frozenset()
         self.freeze_until = 0.0
@@ -76,6 +118,7 @@ class Mapper:
         self.last_ts: int | None = None
         self.touch_prev: tuple[int, int] | None = None
         self.touch_start: tuple[float, int, int] | None = None
+        self.touch_clicked = False  # the pad was pressed down during this touch: not a tap
         self.scroll_frac = 0.0
         # clutch: hold the clutch button, touch the pad zone, reposition, release
         cc = {"enabled": False, "button": "trigger", "zone": "bottom", "zone_size": 0.35,
@@ -229,6 +272,8 @@ class Mapper:
         if t.touching:
             if self.touch_start is None:
                 self.touch_start = (now, t.x, t.y)
+            if "touchpad" in p.buttons:
+                self.touch_clicked = True
             if self.touch_prev is not None:
                 dx, dy = t.x - self.touch_prev[0], t.y - self.touch_prev[1]
                 if mode == "cursor":
@@ -252,10 +297,12 @@ class Mapper:
                 else:
                     name = "swipe_down" if dy > 0 else "swipe_up"
                 self.tap_action(self.gestures.get(name, "none"))
-            elif dur < SWIPE_MAX_S and max(abs(dx), abs(dy)) < TAP_MAX_DIST and "touchpad" not in self.prev_buttons:
+            elif (dur < SWIPE_MAX_S and max(abs(dx), abs(dy)) < TAP_MAX_DIST
+                  and not self.touch_clicked and "touchpad" not in p.buttons):
                 self.tap_action(self.gestures.get("tap", "none"))
         self.touch_prev = None
         self.touch_start = None
+        self.touch_clicked = False
 
     def reset(self) -> None:
         self.out.release_all()
@@ -265,22 +312,32 @@ class Mapper:
         self.prev_buttons = frozenset()
         self.last_ts = None
         self.touch_prev = self.touch_start = None
+        self.touch_clicked = False
 
 
 async def main(config_path: str, with_viewer: bool = False) -> None:
+    try:
+        with open(config_path, "rb") as f:
+            mapper = Mapper(tomllib.load(f))
+    except (OSError, tomllib.TOMLDecodeError, ValueError) as exc:
+        sys.exit(f"{config_path}: {exc}")
     viewer = None
     if with_viewer:
         from bridge import ViewerServer
 
         viewer = ViewerServer()
         await viewer.start()
-    with open(config_path, "rb") as f:
-        cfg = tomllib.load(f)
     if not accessibility_ok():
         print("WARNING: this terminal app lacks Accessibility permission, so input events will be\n"
               "ignored by macOS. Grant it in System Settings > Privacy & Security > Accessibility,\n"
               "then restart this script.", flush=True)
-    mapper = Mapper(cfg)
+    try:
+        await run(mapper, viewer)
+    finally:
+        mapper.reset()  # Ctrl-C mid-drag or with a key held: let go of everything
+
+
+async def run(mapper: Mapper, viewer) -> None:
     while True:
         disconnected = asyncio.Event()
         try:

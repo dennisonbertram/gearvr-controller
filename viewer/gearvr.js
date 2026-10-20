@@ -51,34 +51,50 @@ export class BluetoothSource extends Source {
   static get supported() { return !!navigator.bluetooth; }
 
   async connect() {
+    // disconnect() may be called while we are still awaiting: stop and let go of the link
+    const alive = () => {
+      if (this.closed) { this.device?.gatt.disconnect(); throw new Error('cancelled'); }
+    };
     this.onStatus('choose the controller…');
     this.device = await navigator.bluetooth.requestDevice({
       filters: [{ namePrefix: 'Gear VR Controller' }],
       optionalServices: [SERVICE],
     });
+    alive();
     this.device.addEventListener('gattserverdisconnected', () => {
       clearInterval(this.keepalive);
       this.onStatus('disconnected');
     });
     this.onStatus('connecting');
     const server = await this.device.gatt.connect();
+    alive();
     const service = await server.getPrimaryService(SERVICE);
     this.data = await service.getCharacteristic(DATA_CHAR);
     this.cmd = await service.getCharacteristic(CMD_CHAR);
+    alive();
     let ackResolve = null;
     this.data.addEventListener('characteristicvaluechanged', (e) => {
       const dv = e.target.value;
       const bytes = new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
-      if (bytes.length === 2 && ackResolve) { ackResolve(bytes); ackResolve = null; }
+      if (bytes.length === 2 && bytes[0] === 0x08 && bytes[1] === 0x00 && ackResolve) {
+        ackResolve(true); ackResolve = null;
+      }
       this.handleRaw(bytes);
     });
     await this.data.startNotifications();
-    // VR mode must be acknowledged (~1.5 s) before starting the stream.
+    // VR mode must be acknowledged (~1.5 s) before starting the stream; sending
+    // 0100 without the ack makes the controller stop streaming shortly after.
     const ack = new Promise((res) => { ackResolve = res; });
     await this.send([0x08, 0x00]);
     this.onStatus('waiting for VR-mode ack');
-    await Promise.race([ack, new Promise((r) => setTimeout(r, 4000))]);
+    const acked = await Promise.race([ack, new Promise((r) => setTimeout(() => r(false), 4000))]);
+    alive();
+    if (!acked) {
+      this.disconnect();
+      throw new Error('controller did not acknowledge VR mode, retry');
+    }
     await this.send([0x01, 0x00]);
+    alive();
     this.keepalive = setInterval(() => this.send([0x04, 0x00]).catch(() => {}), 3000);
     this.onStatus(`streaming · ${this.device.name}`);
   }
@@ -86,9 +102,11 @@ export class BluetoothSource extends Source {
   send(bytes) { return this.cmd.writeValueWithResponse(new Uint8Array(bytes)); }
 
   disconnect() {
+    this.closed = true;
     clearInterval(this.keepalive);
     if (this.device?.gatt.connected) {
-      this.send([0x00, 0x00]).finally(() => this.device.gatt.disconnect());
+      Promise.resolve().then(() => this.cmd && this.send([0x00, 0x00])).catch(() => {})
+        .finally(() => this.device.gatt.disconnect());
     }
   }
 }
@@ -100,9 +118,10 @@ export class BridgeSource extends Source {
       const ws = new WebSocket(url);
       ws.binaryType = 'arraybuffer';
       this.ws = ws;
-      ws.onopen = () => resolve();
+      let opened = false;
+      ws.onopen = () => { opened = true; resolve(); };
       ws.onerror = () => reject(new Error('bridge not reachable'));
-      ws.onclose = () => this.onStatus('bridge closed');
+      ws.onclose = () => { if (opened) this.onStatus('bridge closed'); }; // else connect() rejected
       ws.onmessage = (e) => {
         const bytes = new Uint8Array(e.data);
         if (bytes[0] === 0x53 && bytes.length !== 60) { // 'S' + status text

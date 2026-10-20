@@ -1,4 +1,5 @@
 # Gear VR Controller -> macOS input mapping. Edit and restart remote.py.
+# Only remote.py reads this file; the Mac app keeps its own settings (Settings...).
 #
 # Button actions:
 #   left_click | right_click | middle_click      (held = drag)

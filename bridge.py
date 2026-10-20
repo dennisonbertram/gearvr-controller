@@ -9,6 +9,10 @@ binary WebSocket frame; the page decodes it with the same rules as gearvr.py.
 import asyncio
 import mimetypes
 import sys
+
+if sys.version_info < (3, 11):  # same requirement as remote.py
+    sys.exit(f"bridge.py needs Python 3.11+, this is {sys.version.split()[0]} "
+             "(try: brew install python@3.12)")
 import webbrowser
 from http import HTTPStatus
 from pathlib import Path
@@ -21,6 +25,8 @@ from gearvr import Controller
 
 VIEWER_DIR = Path(__file__).parent / "viewer"
 PORT = 8765
+# Only this server's own viewer may open /ws. Without the check any website open in
+# the browser could read the controller stream (the hosted viewer uses Web Bluetooth).
 
 
 class ViewerServer:
@@ -38,6 +44,10 @@ class ViewerServer:
 
     def _static(self, connection: ServerConnection, request: Request) -> Response | None:
         if request.path == "/ws":
+            origin = request.headers.get("Origin")
+            local = {f"http://localhost:{self.port}", f"http://127.0.0.1:{self.port}"}
+            if origin is not None and origin not in local:
+                return connection.respond(HTTPStatus.FORBIDDEN, "bad origin\n")
             return None  # proceed with the WebSocket handshake
         rel = request.path.split("?")[0].lstrip("/") or "index.html"
         path = (VIEWER_DIR / rel).resolve()

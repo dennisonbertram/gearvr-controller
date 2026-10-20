@@ -15,39 +15,46 @@ enum SystemAudio {
         return status == noErr && id != 0 ? id : nil
     }
 
-    /// Main volume first; some devices only expose per-channel volume.
-    private static func addresses(_ device: AudioDeviceID) -> [AudioObjectPropertyAddress] {
-        [kAudioObjectPropertyElementMain, 1, 2].map {
-            AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyVolumeScalar,
-                                       mScope: kAudioDevicePropertyScopeOutput, mElement: $0)
-        }
-    }
-
-    static var volume: Double? {
-        guard let device else { return nil }
-        for var address in addresses(device) where AudioObjectHasProperty(device, &address) {
+    /// The main volume, or the left and right channel volumes on devices that only have those.
+    private static func levels(_ device: AudioDeviceID) -> [(address: AudioObjectPropertyAddress, value: Double)] {
+        func read(_ element: AudioObjectPropertyElement) -> (AudioObjectPropertyAddress, Double)? {
+            var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyVolumeScalar,
+                                                     mScope: kAudioDevicePropertyScopeOutput, mElement: element)
             var value = Float32(0)
             var size = UInt32(MemoryLayout<Float32>.size)
-            if AudioObjectGetPropertyData(device, &address, 0, nil, &size, &value) == noErr {
-                return Double(value)
-            }
+            guard AudioObjectHasProperty(device, &address),
+                  AudioObjectGetPropertyData(device, &address, 0, nil, &size, &value) == noErr else { return nil }
+            return (address, Double(value))
         }
-        return nil
+        if let main = read(kAudioObjectPropertyElementMain) { return [main] }
+        return [1, 2].compactMap(read)
     }
+
+    /// The louder channel, when there is no main volume.
+    static var volume: Double? {
+        guard let device else { return nil }
+        return levels(device).map(\.value).max()
+    }
+
+    private static var balance: [Double]? // per-channel level relative to the louder one
 
     @discardableResult
     static func setVolume(_ level: Double) -> Bool {
         guard let device else { return false }
-        var value = Float32(min(max(level, 0), 1))
+        let level = min(max(level, 0), 1)
+        let current = levels(device)
+        let top = current.map(\.value).max() ?? 0
+        // scale the channels together so the balance set in Sound settings survives,
+        // remembering it across a slide down to silence
+        if top > 0.001, current.count > 1 { balance = current.map { $0.value / top } }
+        let ratios = current.count > 1 && balance?.count == current.count ? balance! : current.map { _ in 1.0 }
         let size = UInt32(MemoryLayout<Float32>.size)
         var ok = false
-        for var address in addresses(device) where AudioObjectHasProperty(device, &address) {
+        for (i, (var address, _)) in current.enumerated() {
             var settable = DarwinBoolean(false)
             guard AudioObjectIsPropertySettable(device, &address, &settable) == noErr, settable.boolValue else { continue }
-            if AudioObjectSetPropertyData(device, &address, 0, nil, size, &value) == noErr {
-                ok = true
-                if address.mElement == kAudioObjectPropertyElementMain { break } // main covers all channels
-            }
+            var value = Float32(ratios[i] * level)
+            if AudioObjectSetPropertyData(device, &address, 0, nil, size, &value) == noErr { ok = true }
         }
         if ok { unmuteIfNeeded(device) }
         return ok
@@ -81,12 +88,18 @@ final class VolumeHUD {
         label.stringValue = "\(Int((level * 100).rounded()))%"
         let width = bar.bounds.width * min(max(level, 0), 1)
         fill.frame = CGRect(x: 0, y: 0, width: width, height: bar.bounds.height)
-        if !panel.isVisible {
+        hideWork?.cancel()
+        if panel.isVisible {
+            // may be fading out: take over the running animation
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0
+                panel.animator().alphaValue = 1
+            }
+        } else {
             position(panel)
             panel.alphaValue = 1
             panel.orderFrontRegardless()
         }
-        hideWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
             MainActor.assumeIsolated {
                 guard let self else { return }

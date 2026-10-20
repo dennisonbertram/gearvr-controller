@@ -40,9 +40,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var dock: DockPresence?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        warnIfNotInstalled()
         model.start()
         dock = DockPresence(model: model)
         if let dir = Snapshot.directory { Snapshot.run(model: model, into: dir) }
+    }
+
+    /// Opened straight from the disk image, macOS runs a temporary copy (App Translocation), so
+    /// launch at login would point at something that disappears when the image is ejected.
+    private func warnIfNotInstalled() {
+        let path = Bundle.main.bundlePath
+        guard path.hasPrefix("/Volumes/") || path.contains("/AppTranslocation/"),
+              !model.dryRun, Snapshot.directory == nil else { return }
+        let alert = NSAlert()
+        alert.messageText = "Move GearVR Remote to Applications"
+        alert.informativeText = "It's running from the disk image. Drag it into your Applications folder and open it from there, so it can start when you log in and keeps working after the disk image is ejected."
+        alert.addButton(withTitle: "Quit")
+        alert.addButton(withTitle: "Run Anyway")
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn { NSApp.terminate(nil) }
     }
 
     /// Launching the app again (Finder, Spotlight, Launchpad) while it runs opens its window,

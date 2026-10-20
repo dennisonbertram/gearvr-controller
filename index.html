@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GearVR Remote for Mac</title>
+<meta name="description" content="Turn a discontinued Samsung Gear VR controller into a gyro air-mouse, trackpad and media remote for your Mac. Free, open source menu-bar app, plus the fully documented Bluetooth LE protocol.">
+<meta name="theme-color" content="#131c28">
+<link rel="canonical" href="https://dennisonbertram.github.io/gearvr-controller/">
+<link rel="icon" type="image/png" href="docs/screenshots/app-icon.png">
+<link rel="apple-touch-icon" href="docs/screenshots/app-icon.png">
+
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Gear VR Controller, revived">
+<meta property="og:title" content="GearVR Remote: your old Gear VR controller is a Mac remote now">
+<meta property="og:description" content="A free menu-bar app that turns the discontinued Samsung Gear VR controller into a gyro air-mouse, trackpad and media remote for macOS.">
+<meta property="og:url" content="https://dennisonbertram.github.io/gearvr-controller/">
+<meta property="og:image" content="https://dennisonbertram.github.io/gearvr-controller/docs/screenshots/menu.png">
+<meta property="og:image:width" content="620">
+<meta property="og:image:height" content="924">
+<meta property="og:image:alt" content="The GearVR Remote menu: Control this Mac, Air mouse, Magnetic buttons, Re-home clutch, pointer speed and touchpad mode.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="GearVR Remote: your old Gear VR controller is a Mac remote now">
+<meta name="twitter:description" content="Gyro air-mouse, trackpad and media remote for macOS, from a $40 controller Samsung stopped making.">
+<meta name="twitter:image" content="https://dennisonbertram.github.io/gearvr-controller/docs/screenshots/menu.png">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,400..800&family=Instrument+Sans:ital,wght@0,400..700;1,400&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="docs/site/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="top">
+  <a class="brand" href="#top" aria-label="GearVR Remote, back to top">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16.2 2.5a5.3 5.3 0 0 1 3.75 9.05l-9.2 9.2a3 3 0 0 1-4.25-4.25l5.65-5.65A5.3 5.3 0 0 1 16.2 2.5Z" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="16.2" cy="7.8" r="2.6" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+    <span>GearVR Remote</span>
+  </a>
+  <nav aria-label="Sections">
+    <a href="#demo">Try it</a>
+    <a href="#features">Features</a>
+    <a href="#install">Install</a>
+    <a href="#hackers">Protocol</a>
+    <a href="#faq">FAQ</a>
+  </nav>
+  <a class="gh" href="https://github.com/dennisonbertram/gearvr-controller">GitHub</a>
+</header>
+
+<main id="main">
+
+<!-- ============================================================ HERO -->
+<section class="hero" id="top">
+  <div class="hero-copy">
+    <p class="kicker">Gear VR Controller, revived</p>
+    <h1>Your old Gear&nbsp;VR controller is a Mac remote now.</h1>
+    <p class="lede">Samsung stopped making the $40 Gear VR controller years ago. GearVR Remote is a free menu-bar app that turns it into a gyro air-mouse, a thumb trackpad and a media remote for macOS. Point to move the cursor, pull the trigger to click.</p>
+    <div class="cta">
+      <a class="btn-dl js-download" href="https://github.com/dennisonbertram/gearvr-controller/releases/latest">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 20h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span><b>Download for macOS</b><small class="js-dl-meta">macOS 14 or later, Apple silicon and Intel</small></span>
+      </a>
+      <div class="cta-2">
+        <a class="link-btn" href="https://github.com/dennisonbertram/gearvr-controller">View on GitHub</a>
+        <a class="link-btn" href="viewer/">Try the live 3D viewer</a>
+      </div>
+    </div>
+  </div>
+  <div class="hero-art" aria-hidden="true">
+    <svg class="orbit" viewBox="0 0 400 400">
+      <circle cx="200" cy="200" r="186" class="o1"/>
+      <circle cx="200" cy="200" r="150" class="o2"/>
+      <circle cx="200" cy="14" r="5" class="dot"/>
+    </svg>
+    <img class="hero-icon" src="docs/screenshots/app-icon.png" width="512" height="512" alt="">
+  </div>
+</section>
+
+<!-- ============================================================ DEMO -->
+<section class="demo-wrap" id="demo" aria-labelledby="demo-h">
+  <div class="sec-head">
+    <h2 id="demo-h">Try it without the controller</h2>
+    <p>This is a simulation of the real app. Aim with the tilt pad (or the arrow keys), pull the trigger to click, and slide on the touchpad. The log shows what GearVR Remote would send to your Mac.</p>
+  </div>
+
+  <div class="demo" id="demoStage" tabindex="0" aria-label="Interactive demo. Arrow keys aim, Space holds the trigger, H is Home, B is Back, plus and minus change volume.">
+
+    <!-- simulated Mac -->
+    <div class="mac">
+      <div class="mac-screen" id="screen">
+        <div class="menubar">
+          <span class="apple" aria-hidden="true"></span>
+          <b>Tunes</b><span>File</span><span>Edit</span><span class="hide-sm">Controls</span>
+          <span class="mb-right">
+            <span class="mb-glyph" id="mbGlyph" title="GearVR Remote" data-target="GearVR Remote menu bar icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16.2 2.5a5.3 5.3 0 0 1 3.75 9.05l-9.2 9.2a3 3 0 0 1-4.25-4.25l5.65-5.65A5.3 5.3 0 0 1 16.2 2.5Z"/><circle cx="16.2" cy="7.8" r="2.4"/></svg>
+            </span>
+            <span class="clock" id="clock">9:41</span>
+          </span>
+        </div>
+
+        <div class="win" id="win">
+          <div class="titlebar">
+            <span class="lights">
+              <i class="tl red" data-target="Close button" data-act="close"></i>
+              <i class="tl yellow" data-target="Minimize button" data-act="min"></i>
+              <i class="tl green" data-target="Zoom button" data-act="zoom"></i>
+            </span>
+            <span class="wtitle">Late Night Mix</span>
+          </div>
+          <div class="player">
+            <div class="art" aria-hidden="true"></div>
+            <div class="np">
+              <b id="npTitle">Signal Lost</b>
+              <span id="npArtist">Low Orbit</span>
+              <div class="transport">
+                <button type="button" tabindex="-1" class="tb" data-target="Previous track" data-act="prev" aria-label="Previous">
+                  <svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg></button>
+                <button type="button" tabindex="-1" class="tb big" id="playBtn" data-target="Play" data-act="play" aria-label="Play">
+                  <svg viewBox="0 0 24 24" class="i-play"><path d="M7 4v16l13-8z"/></svg>
+                  <svg viewBox="0 0 24 24" class="i-pause"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg></button>
+                <button type="button" tabindex="-1" class="tb" data-target="Next track" data-act="next" aria-label="Next">
+                  <svg viewBox="0 0 24 24"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg></button>
+                <button type="button" tabindex="-1" class="tb" data-target="Like" data-act="like" id="likeBtn" aria-label="Like">
+                  <svg viewBox="0 0 24 24"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10Z"/></svg></button>
+              </div>
+            </div>
+          </div>
+          <ol class="tracks" id="tracks" aria-label="Playlist"></ol>
+        </div>
+
+        <div class="dock" id="dock">
+          <i data-target="Finder in the Dock" data-act="dock" style="--c1:#5fb3ff;--c2:#2a6fd6"></i>
+          <i data-target="Tunes in the Dock" data-act="dock" style="--c1:#ff7a8a;--c2:#d9365a"></i>
+          <i data-target="Notes in the Dock" data-act="dock" style="--c1:#ffe27a;--c2:#e9b52f"></i>
+          <i data-target="Terminal in the Dock" data-act="dock" style="--c1:#5a6375;--c2:#262c38"></i>
+        </div>
+
+        <div class="ctx" id="ctx" hidden>
+          <span data-target="Play Next" data-act="ctx">Play Next</span>
+          <span data-target="Add to Playlist" data-act="ctx">Add to Playlist</span>
+          <span data-target="Show in Finder" data-act="ctx">Show in Finder</span>
+        </div>
+
+        <div class="hud" id="hud" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true" class="hud-ico"><path d="M4 9h4l5-4v14l-5-4H4z"/><path class="w1" d="M16 9a4 4 0 0 1 0 6"/><path class="w2" d="M18.5 6.5a7.5 7.5 0 0 1 0 11"/></svg>
+          <div class="hud-bar"><div id="hudFill"></div></div>
+          <span class="hud-label" id="hudLabel"></span>
+        </div>
+        <div class="toast" id="toast" hidden></div>
+        <div class="bubble" id="bubble" hidden></div>
+
+        <svg class="cursor" id="cursor" viewBox="0 0 20 28" aria-hidden="true"><path d="M2 2v20l5.2-4.8 3.4 8 3.2-1.4-3.4-7.8H17z"/></svg>
+      </div>
+      <div class="statusline" aria-live="polite">
+        <span id="stAir"><i></i>Air mouse on</span>
+        <span id="stRate">68 packets/s</span>
+        <span id="stMode">Touchpad: Scroll</span>
+        <span id="stClutch">Clutch ready</span>
+      </div>
+    </div>
+
+    <!-- simulated controller -->
+    <div class="rig">
+      <div class="ctl-wrap">
+        <div class="ctl" id="ctl">
+          <svg viewBox="-18 0 218 430" class="ctl-svg" id="ctlSvg">
+            <defs>
+              <linearGradient id="gBody" x1="0" x2="1">
+                <stop offset="0" stop-color="#3a4252"/><stop offset=".5" stop-color="#4f5869"/><stop offset="1" stop-color="#363d4b"/>
+              </linearGradient>
+              <radialGradient id="gPad" cx=".45" cy=".4" r=".7">
+                <stop offset="0" stop-color="#2a313e"/><stop offset="1" stop-color="#1a1f28"/>
+              </radialGradient>
+            </defs>
+            <!-- trigger, on the underside: drawn peeking out to the left of the head -->
+            <g class="c-btn trig" id="bTrigger" role="button" tabindex="0" aria-label="Trigger (left click). Hold it and touch the bottom of the pad to clutch.">
+              <path class="trig-shape" transform="translate(-20 0)" d="M48 66c-26 6-40 28-38 54 1 16 11 27 26 31l14-8c-9-8-14-19-14-32 0-15 6-28 18-38z"/>
+              <text x="-16" y="178" class="c-lbl">Trigger</text>
+            </g>
+            <path class="body" d="M110 10a80 80 0 0 1 56 137c-10 10-18 22-18 36v196a38 38 0 0 1-76 0V183c0-14-8-26-18-36A80 80 0 0 1 110 10Z" transform="translate(-10 0)"/>
+            <g id="bPad" class="pad" role="button" tabindex="0" aria-label="Touchpad. Drag to use the current touchpad mode, tap to right click.">
+              <circle cx="100" cy="90" r="62" class="pad-ring"/>
+              <circle cx="100" cy="90" r="57" class="pad-face"/>
+              <path class="clutch-zone" d="M48 112a57 57 0 0 0 104 0Z"/>
+              <circle cx="100" cy="90" r="9" class="touch-dot" id="touchDot"/>
+            </g>
+            <g class="c-btn" id="bBack" role="button" tabindex="0" aria-label="Back (Escape)">
+              <circle cx="76" cy="186" r="15" class="kb"/>
+              <path d="M80 180l-6 6 6 6" class="kg"/>
+            </g>
+            <g class="c-btn" id="bHome" role="button" tabindex="0" aria-label="Home (air-mouse on or off)">
+              <circle cx="124" cy="186" r="15" class="kb"/>
+              <circle cx="124" cy="186" r="5" class="kg"/>
+            </g>
+            <g class="c-btn" id="bVolUp" role="button" tabindex="0" aria-label="Volume up">
+              <path d="M86 240a14 14 0 0 1 28 0v26H86z" class="kb"/>
+              <path d="M100 246v12m-6-6h12" class="kg"/>
+            </g>
+            <g class="c-btn" id="bVolDown" role="button" tabindex="0" aria-label="Volume down">
+              <path d="M86 268h28v26a14 14 0 0 1-28 0z" class="kb"/>
+              <path d="M94 284h12" class="kg"/>
+            </g>
+            <circle cx="100" cy="360" r="3" class="led" id="led"/>
+          </svg>
+        </div>
+      </div>
+
+      <div class="rig-side">
+        <div class="tilt" id="tilt" role="application" aria-label="Tilt pad: move over it to aim the controller">
+          <span class="tilt-grid" aria-hidden="true"></span>
+          <span class="tilt-puck" id="tiltPuck" aria-hidden="true"></span>
+          <span class="tilt-hint">Aim here<small>move over this pad, or drag on a phone</small></span>
+        </div>
+
+        <div class="ctrls">
+          <div class="seg" role="radiogroup" aria-label="Touchpad mode" id="modeSeg">
+            <button type="button" role="radio" aria-checked="true" data-mode="scroll">Scroll</button>
+            <button type="button" role="radio" aria-checked="false" data-mode="cursor">Cursor</button>
+            <button type="button" role="radio" aria-checked="false" data-mode="swipes">Swipes</button>
+            <button type="button" role="radio" aria-checked="false" data-mode="volume">Volume</button>
+          </div>
+          <label class="slider">
+            <span>Magnet strength <em id="magVal">subtle</em></span>
+            <input type="range" min="0" max="100" value="30" id="magnet">
+            <span class="ends"><small>Subtle</small><small>Strong</small></span>
+          </label>
+          <div class="toggles">
+            <label class="sw"><input type="checkbox" id="clutchOn" checked><span>Re-home clutch</span></label>
+            <button type="button" class="latch" id="latch" aria-pressed="false">Hold trigger</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- log + walkthrough -->
+    <aside class="side">
+      <div class="steps" aria-labelledby="steps-h">
+        <div class="steps-head">
+          <h3 id="steps-h">Six things to try</h3>
+          <span id="stepCount">0 of 6</span>
+        </div>
+        <ol id="steps">
+          <li data-step="aim"><b>Aim</b><span>Move over the tilt pad, or use the arrow keys, to swing the pointer.</span></li>
+          <li data-step="click"><b>Click</b><span>Put the pointer on Play and press the Trigger.</span></li>
+          <li data-step="scroll"><b>Scroll</b><span>In Scroll mode, drag up and down on the round touchpad.</span></li>
+          <li data-step="volume"><b>Volume</b><span>Press Vol + or Vol −, or switch the pad to Volume and slide.</span></li>
+          <li data-step="clutch"><b>Re-home</b><span>Hold the Trigger, touch the bottom of the pad (tink), aim somewhere else, then let go (pop). The pointer stays put. With a mouse, use Hold trigger or the Space bar.</span></li>
+          <li data-step="magnet"><b>Magnet</b><span>Drag Magnet strength past the middle, then aim at the traffic lights. The pointer snaps onto each one.</span></li>
+        </ol>
+        <button type="button" class="reset" id="resetDemo">Start over</button>
+      </div>
+      <div class="log">
+        <h3>What the app sends</h3>
+        <ol id="log" aria-live="polite" aria-relevant="additions"></ol>
+      </div>
+    </aside>
+  </div>
+  <p class="demo-keys">Keyboard: click the demo first, then <kbd>←</kbd><kbd>↑</kbd><kbd>→</kbd><kbd>↓</kbd> aim, <kbd>Space</kbd> trigger, <kbd>H</kbd> Home, <kbd>B</kbd> Back, <kbd>+</kbd> <kbd>−</kbd> volume.</p>
+</section>
+
+<!-- ============================================================ FEATURES -->
+<section class="features" id="features" aria-labelledby="feat-h">
+  <div class="sec-head">
+    <h2 id="feat-h">What it does</h2>
+    <p>Everything in the demo is in the app, plus the settings to tune it for your hand.</p>
+  </div>
+
+  <div class="feat-grid">
+    <article class="feat f-air">
+      <h3>Gyro air-mouse with adaptive smoothing</h3>
+      <p>Point and turn to move the cursor. Turning is measured around the real vertical, so it works however you roll your wrist. Smoothing adapts to speed: slow, careful moves are steadied and fast flicks come through without lag.</p>
+    </article>
+    <article class="feat f-mag">
+      <h3>Magnetic buttons</h3>
+      <p>Buttons, links, tabs, menu items and Dock icons get slightly sticky, so arm wobble can't knock you off them. Past the middle of the slider it becomes a real magnet: the pointer snaps on, a small push hops to the next button, a push into empty space pulls free.</p>
+    </article>
+    <article class="feat f-clutch">
+      <h3>Re-home clutch</h3>
+      <p>Arm drifted somewhere awkward? Hold the trigger, touch the bottom of the pad (<i>tink</i>), move your hand back, release (<i>pop</i>). The cursor never moved and nothing was clicked. Lost the pointer entirely? Double-click the trigger and hold the second click: it jumps back to the middle of the screen.</p>
+    </article>
+    <article class="feat f-pad">
+      <h3>Four touchpad modes</h3>
+      <p><b>Scroll</b> while the air-mouse is on, <b>Cursor</b> like a laptop trackpad, <b>Swipes</b> that send arrow keys or anything you map, and <b>Volume</b> for smooth system volume under your thumb.</p>
+    </article>
+    <article class="feat f-vol">
+      <h3>Hold to repeat, touchpad volume</h3>
+      <p>Vol ± send the same media keys as your keyboard, with the usual macOS volume display, and keep going while held. Volume mode sets the output device directly in fine steps instead of sixteenths.</p>
+    </article>
+    <article class="feat f-map">
+      <h3>Every button remappable</h3>
+      <p>Trigger, Home, Back, pad click, Vol ± and all four swipes can be a click, a key combo like <code>cmd+[</code>, a media key (play, next, mute, brightness), or a shell command.</p>
+    </article>
+    <article class="feat f-train">
+      <h3>Training mode</h3>
+      <p>A one-minute aiming exercise: click 15 targets that shrink to the size of a close button. It measures your tremor and accuracy, then suggests speed, smoothing and magnet strength you can apply with one click.</p>
+    </article>
+    <article class="feat f-cal">
+      <h3>Recalibrate in two seconds</h3>
+      <p>If the pointer creeps while your hand is still, put the controller down and press Start. It re-measures the gyro's zero point, and keeps the old calibration if you bumped it.</p>
+    </article>
+  </div>
+
+  <div class="battery" aria-labelledby="bat-h">
+    <div class="bat-copy">
+      <h3 id="bat-h">Battery care, built in</h3>
+      <p>The controller runs on two AAA batteries and stays awake as long as an app streams from it. So GearVR Remote lets it sleep: and only asks for the fast sensor stream when it needs it.</p>
+      <ul>
+        <li><b>Sleeps after idle minutes.</b> Five by default, set in Settings → Pointer. The sensors go off, the app lets go, and the controller falls asleep a couple of minutes later.</li>
+        <li><b>Sleeps with your Mac.</b> The sensors switch off the moment your Mac sleeps or locks.</li>
+        <li><b>Pause keeps the link.</b> Turning off "Control this Mac" switches the sensors off but stays connected.</li>
+        <li><b>Press Home to wake.</b> Or click Wake in the menu. The app reconnects on its own. A slow red flash on the controller means new batteries.</li>
+      </ul>
+    </div>
+    <figure class="bat-rates" aria-label="Sensor stream rate by state">
+      <figcaption>How fast the controller talks, by state</figcaption>
+      <div class="rate"><span>Air-mouse on</span><div class="rbar"><i style="--w:100%"></i></div><b>68 packets/s</b></div>
+      <div class="rate"><span>Buttons and scrolling only</span><div class="rbar"><i style="--w:44%"></i></div><b>30 packets/s</b></div>
+      <div class="rate"><span>Paused</span><div class="rbar"><i style="--w:0%"></i></div><b>sensors off, still connected</b></div>
+      <div class="rate"><span>Idle 5 min, or Mac asleep</span><div class="rbar off"><i style="--w:0%"></i></div><b>controller asleep</b></div>
+    </figure>
+  </div>
+</section>
+
+<!-- ============================================================ GALLERY -->
+<section class="gallery" id="screens" aria-labelledby="gal-h">
+  <div class="sec-head">
+    <h2 id="gal-h">The app</h2>
+    <p>A menu-bar glyph with quick switches, and a settings window for everything else. Click a screenshot to enlarge it.</p>
+  </div>
+  <div class="shots" id="shots">
+    <figure class="s-menu"><button type="button"><img src="docs/screenshots/menu.png" width="620" height="924" loading="lazy" alt="GearVR Remote menu with switches for Control this Mac, Air mouse, Magnetic buttons and Re-home clutch, plus pointer speed and touchpad mode"></button><figcaption>The menu: pause, air-mouse, magnet and clutch switches, pointer speed, touchpad mode and a live view of the buttons.</figcaption></figure>
+    <figure><button type="button"><img src="docs/screenshots/settings-welcome.png" width="1080" height="1392" loading="lazy" alt="Welcome tab with a setup checklist for Bluetooth, Accessibility and connection"></button><figcaption>Welcome: a live setup checklist and a cheat sheet of the controls.</figcaption></figure>
+    <figure><button type="button"><img src="docs/screenshots/settings-pointer.png" width="1040" height="1434" loading="lazy" alt="Pointer settings: speed, smoothing, dead zone, click steadying, magnet strength, sleep timer"></button><figcaption>Pointer: speed, smoothing, dead zone, magnet strength and the sleep timer.</figcaption></figure>
+    <figure><button type="button"><img src="docs/screenshots/settings-touchpad.png" width="1040" height="1214" loading="lazy" alt="Touchpad settings: modes for air mouse on and off, speeds, and swipe mappings"></button><figcaption>Touchpad: a mode for when the air-mouse is on and one for off, plus swipe actions.</figcaption></figure>
+    <figure><button type="button"><img src="docs/screenshots/settings-buttons.png" width="1040" height="768" loading="lazy" alt="Buttons settings mapping Trigger, Home, Back, Touchpad click and Volume buttons"></button><figcaption>Buttons: map each one to a click, key combo, media key or shell command.</figcaption></figure>
+    <figure><button type="button"><img src="docs/screenshots/settings-clutch.png" width="1040" height="670" loading="lazy" alt="Clutch settings"></button><figcaption>Clutch: which button, which part of the pad, and the tink and pop sounds.</figcaption></figure>
+    <figure><button type="button"><img src="docs/screenshots/settings-general.png" width="1040" height="592" loading="lazy" alt="General settings including launch at login and Always show in the Dock"></button><figcaption>General: start at login and keep a Dock icon.</figcaption></figure>
+    <figure class="s-wide"><button type="button"><img src="docs/screenshots/training-running.png" width="2000" height="1280" loading="lazy" alt="Training mode with a shrinking target on screen"></button><figcaption>Training: 15 targets that shrink to close-button size.</figcaption></figure>
+    <figure class="s-wide"><button type="button"><img src="docs/screenshots/training-results.png" width="2000" height="1280" loading="lazy" alt="Training results with hit rate, tremor and suggested settings"></button><figcaption>Results: hit rate, tremor and suggested settings, applied in one click.</figcaption></figure>
+    <figure><button type="button"><img src="docs/screenshots/training-intro.png" width="2000" height="1280" loading="lazy" alt="Training introduction screen"></button><figcaption>Training starts with a short explanation of what it measures.</figcaption></figure>
+    <figure><button type="button"><img src="docs/screenshots/calibrate.png" width="920" height="462" loading="lazy" alt="Recalibrate the gyro dialog"></button><figcaption>Recalibrate: set it down, press Start, wait two seconds.</figcaption></figure>
+    <figure><button type="button"><img src="docs/screenshots/glyphs.png" width="320" height="112" loading="lazy" alt="Three menu bar glyphs: connected, idle, disconnected"></button><figcaption>The menu-bar glyph fills in once the controller is connected.</figcaption></figure>
+  </div>
+  <dialog class="lightbox" id="lightbox" aria-label="Screenshot">
+    <form method="dialog"><button class="lb-close" aria-label="Close">Close</button></form>
+    <img id="lbImg" alt="">
+    <p id="lbCap"></p>
+  </dialog>
+</section>
+
+<!-- ============================================================ INSTALL -->
+<section class="install" id="install" aria-labelledby="inst-h">
+  <div class="sec-head">
+    <h2 id="inst-h">Install</h2>
+    <p>About two minutes. You need a Mac with macOS 14 Sonoma or later and a Gear VR controller with batteries in it.</p>
+  </div>
+  <div class="inst-grid">
+    <ol class="howto">
+      <li><h3>Download the DMG</h3><p><a class="js-download" href="https://github.com/dennisonbertram/gearvr-controller/releases/latest">Get the latest release</a> <span class="js-dl-meta-inline"></span>. It's a universal app for Apple silicon and Intel.</p></li>
+      <li><h3>Drag it to Applications</h3><p>Open the DMG and drag <b>GearVR Remote</b> onto the Applications folder.</p></li>
+      <li><h3>Open it once, then click Open Anyway</h3><p>The app isn't notarized, so macOS says it can't verify the developer. Go to <b>System Settings → Privacy &amp; Security</b>, scroll down and click <b>Open Anyway</b>.</p></li>
+      <li><h3>Allow Bluetooth</h3><p>Click Allow when macOS asks. The Welcome window shows a checklist that ticks off as you go.</p></li>
+      <li><h3>Allow Accessibility</h3><p><b>System Settings → Privacy &amp; Security → Accessibility</b>, turn on <i>GearVR Remote</i>. Without it, macOS silently ignores the pointer and clicks.</p></li>
+      <li><h3>Press Home on the controller</h3><p>The menu-bar glyph fills in when it connects. Set the controller down for a second so the gyro can calibrate, then pick it up and point.</p></li>
+    </ol>
+    <div class="inst-side">
+      <div class="warn" role="note">
+        <h3>Don't hold Home</h3>
+        <p>Holding Home for several seconds puts the controller in pairing mode and wipes its bond with your Mac. If that happens, choose <b>Forget This Device</b> in Bluetooth settings and connect again.</p>
+      </div>
+      <div class="src">
+        <h3>Or build from source</h3>
+        <p>The Command Line Tools are enough, no Xcode needed. This builds a universal binary and copies it to /Applications.</p>
+        <pre><code>git clone https://github.com/dennisonbertram/gearvr-controller
+cd gearvr-controller/mac
+./build.sh install</code></pre>
+        <button type="button" class="copy" data-copy="git clone https://github.com/dennisonbertram/gearvr-controller && cd gearvr-controller/mac && ./build.sh install">Copy commands</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ HACKERS -->
+<section class="hackers" id="hackers" aria-labelledby="hack-h">
+  <div class="sec-head">
+    <h2 id="hack-h">For hackers</h2>
+    <p>The controller's Bluetooth LE protocol is documented end to end, verified on real hardware with recorded packets and tests.</p>
+  </div>
+  <div class="packet" aria-label="Example data packet, colour-coded by field">
+    <div class="hex" id="hex"></div>
+    <div class="hex-legend">
+      <span class="k-ts">timestamps</span><span class="k-acc">accelerometer</span><span class="k-gyr">gyroscope</span><span class="k-mag">magnetometer</span><span class="k-tch">touchpad</span><span class="k-tmp">temperature</span><span class="k-btn">buttons</span><span class="k-bat">battery</span>
+    </div>
+  </div>
+  <div class="hack-grid">
+    <div>
+      <h3>Protocol highlights</h3>
+      <ul class="plain">
+        <li>Write <code>0800</code>, wait about 1.5 s for the controller to echo it, then <code>0100</code>: a steady 68 packets/s with no drops. Send them back to back and the stream stops.</li>
+        <li>Each packet carries three IMU samples, with calibrated axes and scales.</li>
+        <li><code>0600</code> / <code>0700</code> switch a low-power mode that turns sensors off but stays connected.</li>
+        <li><code>0500</code> returns the real serial number and the touchpad's 320-unit range.</li>
+        <li>A hidden HID consumer-control channel behind a non-standard service UUID.</li>
+      </ul>
+      <a class="link-btn" href="https://github.com/dennisonbertram/gearvr-controller/blob/main/PROTOCOL.md">Read PROTOCOL.md</a>
+    </div>
+    <div>
+      <h3>More in the repo</h3>
+      <dl class="tools">
+        <dt><code>remote.py</code></dt><dd>The same remote as a Python script, configured with <code>config.toml</code>.</dd>
+        <dt><a href="viewer/">Web Bluetooth viewer</a></dt><dd>A to-scale three.js model that mirrors the real controller live in Chrome, with a byte-by-byte packet decoder.</dd>
+        <dt><code>monitor.py</code>, <code>capture.py</code></dt><dd>A live terminal view of the decoded sensors, and a raw packet logger with scripted commands.</dd>
+      </dl>
+      <a href="viewer/" class="viewer-shot"><img src="docs/viewer.png" width="1400" height="900" loading="lazy" alt="The 3D viewer showing the controller model and live sensor panels"></a>
+    </div>
+  </div>
+  <p class="credits">Builds on earlier reverse-engineering by <a href="https://github.com/jsyang/gearvr-controller-webbluetooth">jsyang</a>, <a href="https://github.com/gb2111/Access-GearVR-Controller-from-PC">gb2111</a> and <a href="https://github.com/polygraphene/FreePIEVRController">polygraphene</a>. Released under the <a href="https://github.com/dennisonbertram/gearvr-controller/blob/main/LICENSE">MIT License</a>.</p>
+</section>
+
+<!-- ============================================================ FAQ -->
+<section class="faq" id="faq" aria-labelledby="faq-h">
+  <div class="sec-head"><h2 id="faq-h">Questions</h2></div>
+  <div class="qs">
+    <details>
+      <summary>Which controller do I need?</summary>
+      <p>The Samsung Gear VR Controller, model <b>ET-YO324</b> (also listed as <b>SM-R324</b>). It's the one with a round touchpad, Home and Back buttons, a volume rocker and a trigger underneath. It was tested with firmware YO324XXU0AQC1.</p>
+    </details>
+    <details>
+      <summary>Where can I get one?</summary>
+      <p>Samsung no longer sells it, but used and new-old-stock units turn up on eBay, local marketplaces and in thrift-store Gear VR bundles, often for less than the original $40. Search for "Gear VR controller" or the model number. It takes two AAA batteries.</p>
+    </details>
+    <details>
+      <summary>Which version of macOS?</summary>
+      <p>macOS 14 Sonoma or later, on Apple silicon or Intel. The app is a universal binary.</p>
+    </details>
+    <details>
+      <summary>Why isn't it notarized or on the App Store?</summary>
+      <p>It's a free side project, and notarizing needs a paid Apple developer account. The App Store also doesn't allow apps that drive the pointer through Accessibility like this. The source is all on GitHub, so you can read it or build it yourself. The first launch needs one click on <b>Open Anyway</b> in Privacy &amp; Security.</p>
+    </details>
+    <details>
+      <summary>Accessibility is on, but the pointer doesn't move.</summary>
+      <p>macOS ties the permission to the app's code signature, so after an update or a rebuild the switch can look on while the permission is gone. Run this in Terminal, relaunch the app and allow Accessibility again:</p>
+      <pre><code>tccutil reset Accessibility com.dennisonbertram.gearvr-remote</code></pre>
+    </details>
+    <details>
+      <summary>I can't see the menu-bar icon.</summary>
+      <p>On a Mac with a notch, a full menu bar can hide the icon behind it. The app notices and tells you. Hold <kbd>⌘</kbd> and drag menu-bar icons to make room, or turn on <b>Always show in the Dock</b> in Settings → General. You can also search for "GearVR" in Spotlight; opening it again brings the settings window back.</p>
+    </details>
+  </div>
+</section>
+</main>
+
+<footer class="foot">
+  <p><img src="docs/screenshots/app-icon.png" width="28" height="28" alt=""> GearVR Remote is free and open source under the MIT License. Not affiliated with Samsung or Meta.</p>
+  <p><a href="https://github.com/dennisonbertram/gearvr-controller">GitHub</a> <a href="https://github.com/dennisonbertram/gearvr-controller/releases">Releases</a> <a href="viewer/">3D viewer</a> <a href="https://github.com/dennisonbertram/gearvr-controller/blob/main/PROTOCOL.md">Protocol</a></p>
+</footer>
+
+<script src="docs/site/site.js" defer></script>
+<script src="docs/site/demo.js" defer></script>
+</body>
+</html>

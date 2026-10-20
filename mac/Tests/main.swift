@@ -94,6 +94,85 @@ test("rejects wrong length") {
     check(Packet.parse(Data([0x08, 0x00])) == nil, "2-byte ack is not a packet")
 }
 
+// Expected values from gearvr.py's parse() on the same fixtures (it matches on every captured packet).
+func near(_ a: SIMD3<Double>, _ b: SIMD3<Double>) -> Bool { simd_length(a - b) < 1e-6 }
+
+test("exact IMU decode: timestamps, accel (g) and gyro (deg/s)") {
+    let expected: [String: [(UInt32, SIMD3<Double>, SIMD3<Double>)]] = [
+        "idle": [
+            (53247950, SIMD3(-0.068359375, 0.2421875, 0.99365234375), SIMD3(-1.1900595029751488, -5.460273013650682, 1.960098004900245)),
+            (53252800, SIMD3(-0.0693359375, 0.24169921875, 0.99462890625), SIMD3(-1.1900595029751488, -5.180259012950647, 1.960098004900245)),
+            (53257650, SIMD3(-0.06884765625, 0.24267578125, 0.994140625), SIMD3(-1.12005600280014, -4.760238011900595, 1.7500875043752186)),
+        ],
+        "touch_center": [
+            (139834200, SIMD3(0.0908203125, 0.79443359375, 0.6298828125), SIMD3(-2.1001050052502626, -4.200210010500525, 2.5901295064753236)),
+            (139839050, SIMD3(0.09423828125, 0.79541015625, 0.62890625), SIMD3(-1.68008400420021, -4.690234511725587, 2.24011200560028)),
+            (139843900, SIMD3(0.09375, 0.79736328125, 0.62451171875), SIMD3(-1.3300665033251662, -4.830241512075604, 2.0301015050752538)),
+        ],
+        "point_up": [ // turning while held up: big, distinct values on every axis
+            (221945450, SIMD3(-0.0185546875, 0.97314453125, -0.06298828125), SIMD3(25.691284564228212, -21.351067553377668, 12.95064753237662)),
+            (221950300, SIMD3(-0.01171875, 0.97314453125, -0.072265625), SIMD3(23.101155057752887, -21.071053552677633, 11.130556527826391)),
+            (221955150, SIMD3(-0.015625, 0.970703125, -0.07177734375), SIMD3(22.051102555127756, -19.810990549527475, 9.660483024151208)),
+        ],
+    ]
+    for (name, samples) in expected {
+        let got = fixture(name).samples
+        check(got.count == 3, "\(name) count")
+        for (i, (g, e)) in zip(got, samples).enumerated() {
+            check(g.timestampUS == e.0, "\(name)[\(i)] timestamp \(g.timestampUS)")
+            check(near(g.accel, e.1), "\(name)[\(i)] accel \(g.accel)")
+            check(near(g.gyro, e.2), "\(name)[\(i)] gyro \(g.gyro)")
+        }
+    }
+}
+
+test("exact magnetometer and touch decode") {
+    check(fixture("idle").magRaw == SIMD3(5713, -1155, -187), "idle mag \(fixture("idle").magRaw)")
+    check(fixture("touch_center").magRaw == SIMD3(6002, 245, 71), "touch_center mag \(fixture("touch_center").magRaw)")
+    check(fixture("point_up").magRaw == SIMD3(6301, -632, 163), "point_up mag \(fixture("point_up").magRaw)")
+    let c = fixture("touch_center")
+    check(c.touch == Touch(touching: true, lifted: false, x: 140, y: 179), "touch \(c.touch)")
+    check(c.temperatureC == 26 && c.battery == 100, "temperature \(c.temperatureC), battery \(c.battery)")
+}
+
+test("recorded pitch up moves the cursor up (gyro sign through the mapper)") {
+    let path = (fixturePath as NSString).deletingLastPathComponent + "/caps/guided.jsonl"
+    guard let text = try? String(contentsOfFile: path, encoding: .utf8) else {
+        print("  skip: \(path) not present")
+        return
+    }
+    final class DY: InputSink {
+        var dy = 0.0
+        func move(dx: Double, dy: Double) { self.dy += dy }
+        func mouseButton(_ b: MouseButton, down: Bool) {}
+        func scroll(dy: Int) {}
+        func key(_ combo: String, down: Bool) {}
+        func media(_ name: String, down: Bool) {}
+        func shell(_ command: String) {}
+        func sound(_ name: String) {}
+        func adjustVolume(by delta: Double) {}
+        func recenter() {}
+        func releaseAll() {}
+    }
+    let sink = DY()
+    var cfg = RemoteConfig()
+    cfg.sensitivity = 20
+    cfg.deadzoneDPS = 1
+    cfg.clickFreezeMS = 0
+    cfg.smoothing = 0
+    let m = InputMapper(config: cfg, sink: sink, now: { 0 })
+    var packets = 0
+    for line in text.split(separator: "\n") {
+        guard let obj = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+              obj["src"] as? String == "data", let hex = obj["hex"] as? String, hex.count == 120,
+              ["rotate_yaw", "point_up:prompt"].contains(obj["label"] as? String ?? "") else { continue }
+        m.handle(Packet(samples: Packet.parse(hexData(hex))!.samples, touch: .none, buttons: []))
+        packets += 1
+    }
+    check(packets > 100, "replayed \(packets) packets")
+    check(sink.dy < -500, "cursor went up: dy \(sink.dy)")
+}
+
 // MARK: mapper
 
 final class FakeSink: InputSink {
@@ -106,12 +185,16 @@ final class FakeSink: InputSink {
     func shell(_ command: String) { events.append("shell") }
     func sound(_ name: String) { events.append("sound \(name)") }
     func adjustVolume(by delta: Double) { events.append(String(format: "volume %+.3f", delta)) }
+    func recenter() { events.append("recenter") }
     func releaseAll() {}
     var nonMoves: [String] { events.filter { $0 != "move" } }
 }
 
+final class Clock { var t = 0.0 }
+
 final class Rig {
     let sink = FakeSink()
+    let clock = Clock() // stays at 0 unless a test moves it
     let mapper: InputMapper
     var t: UInt32 = 1000
 
@@ -123,7 +206,8 @@ final class Rig {
         cfg.clutchSound = false
         cfg.smoothing = 0 // these tests check event logic; smoothing has its own test
         tweak(&cfg)
-        mapper = InputMapper(config: cfg, sink: sink, now: { 0 })
+        let clock = self.clock
+        mapper = InputMapper(config: cfg, sink: sink, now: { clock.t })
         mapper.bias.calibrated = true
     }
 
@@ -212,6 +296,106 @@ test("clutch disabled keeps the immediate press") {
     check(r.sink.events == ["left down"], "\(r.sink.events)")
 }
 
+test("clutch: thumb already resting in the zone engages once the hand moves") {
+    let r = Rig()
+    r.feed(touch: touchAt(157, 290), n: 3) // resting on the bottom of the pad
+    r.feed([.trigger], touch: touchAt(157, 290), n: 2)
+    check(!r.mapper.clutched, "not yet: could still be a click")
+    r.feed([.trigger], touch: touchAt(157, 290), yaw: 90, n: 20)
+    check(r.mapper.clutched, "engaged instead of dragging")
+    r.feed(touch: touchAt(157, 290))
+    check(r.sink.nonMoves.isEmpty, "never clicked or dragged: \(r.sink.events)")
+}
+
+test("clutch: a still press with the thumb resting in the zone is a plain click") {
+    let r = Rig()
+    r.feed(touch: touchAt(157, 290), n: 3)
+    r.feed([.trigger], touch: touchAt(157, 290), n: 3)
+    r.feed(touch: touchAt(157, 290))
+    check(!r.mapper.clutched && r.sink.nonMoves == ["left down", "left up"], "\(r.sink.events)")
+}
+
+test("clutch: touch landing in the same packet as the press engages") {
+    let r = Rig()
+    r.feed()
+    r.feed([.trigger], touch: touchAt(157, 290))
+    check(r.mapper.clutched, "engaged")
+    r.feed([.trigger], touch: touchAt(157, 290), yaw: 90, n: 10)
+    r.feed()
+    check(r.sink.events.isEmpty, "\(r.sink.events)")
+}
+
+test("clutch: works with the touchpad click as the clutch button") {
+    let r = Rig { $0.clutchButton = .touchpad; $0.buttons["touchpad"] = "left_click" }
+    r.feed(touch: touchAt(157, 290))
+    r.feed([.touchpad], touch: touchAt(157, 290), yaw: 90, n: 10)
+    check(r.mapper.clutched, "engaged")
+    r.feed()
+    check(r.sink.nonMoves.isEmpty, "\(r.sink.events)")
+}
+
+test("reset releases held keys and media keys") {
+    let r = Rig()
+    r.feed()
+    r.feed([.back, .volumeUp])
+    r.mapper.reset()
+    check(r.sink.events.suffix(2).sorted() == ["key escape false", "media volume_up false"], "\(r.sink.events)")
+    r.feed() // the physical release after reconnecting sends nothing more
+    check(r.sink.events.count == 4, "\(r.sink.events)")
+    r.mapper.reset()
+    check(r.sink.events.count == 4, "nothing held, nothing released: \(r.sink.events)")
+}
+
+test("recenter: a quick second click is an ordinary double-click") {
+    let r = Rig()
+    r.feed()
+    r.feed([.trigger], n: 2)
+    r.clock.t = 0.1; r.feed()
+    r.clock.t = 0.2; r.feed([.trigger], n: 2)
+    check(r.sink.nonMoves == ["left down", "left up"], "second press held back: \(r.sink.nonMoves)")
+    r.clock.t = 0.3; r.feed()
+    check(r.sink.nonMoves == ["left down", "left up", "left down", "left up"], "\(r.sink.nonMoves)")
+}
+
+test("recenter: double-click and hold the second click recenters without clicking") {
+    let r = Rig()
+    r.feed()
+    r.feed([.trigger])
+    r.clock.t = 0.1; r.feed()
+    r.clock.t = 0.2; r.feed([.trigger])
+    r.clock.t = 0.75; r.feed([.trigger], n: 3)
+    r.clock.t = 1.0; r.feed()
+    check(r.sink.nonMoves == ["left down", "left up", "recenter"], "\(r.sink.nonMoves)")
+}
+
+test("recenter: moving during the second press is a double-click-drag") {
+    let r = Rig()
+    r.feed()
+    r.feed([.trigger])
+    r.clock.t = 0.1; r.feed()
+    r.clock.t = 0.2; r.feed([.trigger], yaw: -60, n: 10)
+    r.clock.t = 0.4; r.feed()
+    check(r.sink.nonMoves == ["left down", "left up", "left down", "left up"], "\(r.sink.nonMoves)")
+    check(!r.sink.events.contains("recenter"), "no recenter")
+}
+
+test("recenter: a slow second click is just a click, and the setting turns it off") {
+    let r = Rig()
+    r.feed()
+    r.feed([.trigger])
+    r.clock.t = 0.1; r.feed()
+    r.clock.t = 0.8; r.feed([.trigger])
+    r.clock.t = 1.5; r.feed([.trigger]); r.feed()
+    check(r.sink.nonMoves == ["left down", "left up", "left down", "left up"], "plain click: \(r.sink.nonMoves)")
+    let off = Rig { $0.recenterGesture = false }
+    off.feed()
+    off.feed([.trigger])
+    off.clock.t = 0.1; off.feed()
+    off.clock.t = 0.2; off.feed([.trigger])
+    off.clock.t = 1.0; off.feed([.trigger]); off.feed()
+    check(off.sink.nonMoves == ["left down", "left up", "left down", "left up"], "\(off.sink.nonMoves)")
+}
+
 test("home toggles the air-mouse; no motion when off") {
     let r = Rig()
     var toggles: [Bool] = []
@@ -235,6 +419,7 @@ test("yaw left moves the cursor left, pitch up moves it up") {
         func shell(_ command: String) {}
         func sound(_ name: String) {}
         func adjustVolume(by delta: Double) {}
+        func recenter() {}
         func releaseAll() {}
     }
     let sink = MoveSink()
@@ -284,6 +469,7 @@ test("smoothing: applied by the mapper, and fully bypassed at 0") {
         func shell(_ command: String) {}
         func sound(_ name: String) {}
         func adjustVolume(by delta: Double) {}
+        func recenter() {}
         func releaseAll() {}
     }
     func run(_ smoothing: Double) -> (first: Double, total: Double) {
@@ -307,6 +493,51 @@ test("smoothing: applied by the mapper, and fully bypassed at 0") {
     let raw = run(0), smooth = run(0.5)
     check(abs(smooth.first) < abs(raw.first), "smoothed start is gentler: \(smooth.first) vs \(raw.first)")
     check(abs(smooth.total - raw.total) / abs(raw.total) < 0.1, "same distance overall: \(smooth.total) vs \(raw.total)")
+}
+
+test("smoothing: restarts after the air-mouse was off, not from the old rate") {
+    final class Sum: InputSink {
+        var dx = 0.0
+        func move(dx: Double, dy: Double) { self.dx += dx }
+        func mouseButton(_ b: MouseButton, down: Bool) {}
+        func scroll(dy: Int) {}
+        func key(_ combo: String, down: Bool) {}
+        func media(_ name: String, down: Bool) {}
+        func shell(_ command: String) {}
+        func sound(_ name: String) {}
+        func adjustVolume(by delta: Double) {}
+        func recenter() {}
+        func releaseAll() {}
+    }
+    let sink = Sum()
+    var cfg = RemoteConfig()
+    cfg.clickFreezeMS = 0
+    cfg.deadzoneDPS = 0
+    cfg.smoothing = 0.3
+    let m = InputMapper(config: cfg, sink: sink, now: { 0 })
+    m.bias.calibrated = true
+    var t: UInt32 = 0
+    func feed(_ yaw: Double, n: Int) {
+        for _ in 0..<n {
+            let samples = (0..<3).map { _ -> IMUSample in t &+= 4850; return IMUSample(timestampUS: t, accel: SIMD3(0, 0, 1), gyro: SIMD3(0, 0, yaw)) }
+            m.handle(Packet(samples: samples, touch: .none, buttons: []))
+        }
+    }
+    feed(60, n: 20) // turning at 60 deg/s
+    m.pointerOn = false
+    feed(0, n: 20) // stopped while off
+    m.pointerOn = true
+    sink.dx = 0
+    feed(0, n: 20) // still
+    check(abs(sink.dx) < 0.5, "no drift on resume: \(sink.dx) px")
+    // turning smoothing off and back on to the same value starts fresh too
+    feed(60, n: 20)
+    m.config.smoothing = 0
+    feed(0, n: 1)
+    m.config.smoothing = 0.3
+    sink.dx = 0
+    feed(0, n: 20)
+    check(abs(sink.dx) < 0.5, "no drift after re-enabling: \(sink.dx) px")
 }
 
 test("config: v1 settings on the old default speed move to the new default") {
@@ -347,6 +578,29 @@ test("manual recalibration: rejects a moving controller and keeps the old zero")
         check(false, "state \(b.manual)")
     }
     check(b.bias == before, "old zero kept")
+}
+
+test("manual recalibration: a slow steady turn is not adopted as the zero") {
+    let b = GyroBias()
+    for _ in 0..<100 { b.update(SIMD3(-1.1, -4.5, 1.8)) }
+    let before = b.bias
+    b.startManualCalibration(sampleCount: 200)
+    for _ in 0..<200 { b.update(SIMD3(-1.1, -4.5 + 3, 1.8)) } // arm sagging at 3 deg/s: no wobble
+    if case .finished(let ok, _, let wobble) = b.manual {
+        check(!ok && wobble > 2, "rejected as motion (\(wobble))")
+    } else {
+        check(false, "state \(b.manual)")
+    }
+    check(b.bias == before, "old zero kept")
+    // a real shift shows up the same way twice: the second measurement confirms it
+    b.startManualCalibration(sampleCount: 200)
+    for _ in 0..<200 { b.update(SIMD3(-1.1, -4.5 + 3, 1.8)) }
+    if case .finished(let ok, _, _) = b.manual { check(ok, "confirmed on repeat") }
+    check(simd_length(b.bias - SIMD3(-1.1, -1.5, 1.8)) < 1e-9, "bias \(b.bias)")
+    // a small correction is accepted straight away
+    b.startManualCalibration(sampleCount: 200)
+    for _ in 0..<200 { b.update(SIMD3(-1.1, -1.0, 1.8)) }
+    if case .finished(let ok, _, _) = b.manual { check(ok, "small shift accepted") }
 }
 
 test("gyro bias calibrates when still") {
@@ -407,6 +661,19 @@ test("scroll mode scrolls, gestures mode swipes") {
     g.feed(touch: touchAt(200, 150))
     g.feed()
     check(g.sink.events == ["key right true", "key right false"], "swipe: \(g.sink.events)")
+}
+
+test("gestures: a touchpad click is not also a tap") {
+    let r = Rig { $0.touchModePointerOn = .gestures; $0.gestures["tap"] = "key:space" }
+    r.feed(touch: touchAt(150, 150))
+    r.feed([.touchpad], touch: touchAt(150, 150))
+    r.feed(touch: touchAt(150, 150)) // click released before the finger lifts
+    r.feed()
+    check(r.sink.events == ["right down", "right up"], "click only: \(r.sink.events)")
+    r.sink.events = []
+    r.feed(touch: touchAt(150, 150))
+    r.feed()
+    check(r.sink.events == ["key space true", "key space false"], "a plain tap still taps: \(r.sink.events)")
 }
 
 test("config round-trips and tolerates missing keys") {
@@ -611,6 +878,17 @@ test("magnet: a target that blinks out and back is grabbed again") {
     r.m.targets = [a]
     r.rest(0.2)
     check(r.m.locked == a, "relocked")
+}
+
+test("magnet: speed counts a packet's three moves over the packet's time") {
+    let m = Magnet()
+    var t = 10.0
+    // 100 px/s at 68 packets/s, each packet's motion split over three moves microseconds apart
+    for _ in 0..<200 {
+        t += 1 / 68.0
+        for i in 0..<3 { _ = m.userMove(from: .zero, by: CGVector(dx: 100 / 68.0 / 3, dy: 0), at: t + Double(i) * 1e-5) }
+    }
+    check(abs(m.speedPxPerSec - 100) < 3, "speed \(m.speedPxPerSec)")
 }
 
 print("\n\(passed) checks passed, \(failures) failed")

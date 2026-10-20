@@ -2,7 +2,7 @@
 
 The Samsung Gear VR Controller (ET-YO324 / SM-R324) was discontinued years ago.
 This repo documents its Bluetooth LE protocol completely and puts the controller
-back to work:
+back to work (try the **[interactive demo](https://dennisonbertram.github.io/gearvr-controller/)**):
 
 * **[PROTOCOL.md](PROTOCOL.md)**: the full BLE protocol, verified on hardware. It
   covers the command acknowledgement handshake that unlocks the 68 packets/s
@@ -21,8 +21,11 @@ back to work:
 
 ## Setup
 
+The Python tools need Python 3.11 or later. The `python3` that ships with macOS is
+3.9, so install a newer one first (for example `brew install python@3.12`):
+
 ```sh
-python3 -m venv .venv
+python3.12 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 ```
 
