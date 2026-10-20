@@ -245,11 +245,6 @@ final class ControllerLink: NSObject, CBCentralManagerDelegate, CBPeripheralDele
             // only the VR-mode echo counts: a late 0000 ack from a rate switch must not start the stream early
             if awaitingAck, value == GearVR.Command.vrMode.bytes { startStream() }
         } else if let packet = Packet.parse(value) {
-            if dozing { // the controller is sending again (e.g. a button): it's back in use
-                log?("controller active while dozing; resuming")
-                beginHandshake()
-                return
-            }
             lastPacket = Date()
             onPacket?(packet)
         }
@@ -276,44 +271,43 @@ final class ControllerLink: NSObject, CBCentralManagerDelegate, CBPeripheralDele
 
     /// Sensors off and disconnected, so the controller can fall asleep on its own.
     /// A pending connect brings it back the moment it advertises again (press Home).
-    /// Lets the controller fall asleep. Disconnecting doesn't do it: macOS keeps its own link to
-    /// the bonded controller, so it stays awake. Instead its sensors go off and the app goes
-    /// quiet (no keep-alives); the controller then powers itself down about five minutes later
-    /// and drops the link, and a pending connect catches Home after that.
+    /// Lets the controller fall asleep. It never sleeps while connected, even with its sensors
+    /// off, and after a disconnect it keeps advertising for about 2.5 minutes before sleeping.
+    /// Reconnecting in that window wakes it straight back up, so the pending connect that
+    /// catches Home is only armed once it has had time to fall asleep.
     func sleepNow() {
         guard central.state == .poweredOn, let p = peripheral,
               [.connecting, .handshaking, .streaming, .lowPower].contains(state) else { return }
+        log?("putting the controller to sleep")
+        if cmdChar != nil { send(.off) }
         stopScan()
-        if cmdChar != nil {
-            log?("sensors off; the controller powers down on its own in ~5 min")
-            generation += 1 // drop pending handshake steps
-            keepAlive?.invalidate()
-            ackTimeout?.invalidate()
-            watchdog?.invalidate()
-            awaitingAck = false
-            send(.off)
-        } else {
-            log?("not connected; waiting for Home") // still connecting: nothing to switch off
-            central.cancelPeripheralConnection(p)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.armWake() }
-        }
+        teardown()
         state = .asleep
+        asleepSince = Date()
+        // let the 0000 write go out before dropping the link
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            guard let self, self.state == .asleep, let p = self.peripheral else { return }
+            self.central.cancelPeripheralConnection(p)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.fallAsleepS) { [weak self] in self?.armWake() }
     }
 
-    /// Still connected after sleepNow: the controller hasn't powered down yet.
-    private var dozing: Bool { state == .asleep && cmdChar != nil }
+    static let fallAsleepS: TimeInterval = 210
+    private var asleepSince = Date.distantPast
 
-    /// Brings a sleeping controller back: straight away if it's still dozing on the link,
-    /// otherwise as soon as Home wakes it.
+    /// Reconnects now, e.g. from the menu or when you're back at the Mac. While the controller
+    /// is still awake this connects at once; once it's asleep it connects when Home is pressed.
     func wake() {
-        guard state == .asleep else { return }
-        if dozing { log?("waking the dozing controller"); beginHandshake() } else { armWake() }
+        guard state == .asleep, central.state == .poweredOn, let p = peripheral else { return }
+        log?("waking the controller")
+        asleepSince = .distantPast
+        central.connect(p, options: nil)
     }
 
     /// A pending connect completes the moment the controller wakes up and advertises.
     private func armWake() {
-        guard wakeOnHome, state == .asleep, central.state == .poweredOn, let p = peripheral else { return }
-        if dozing { return } // still connected: it powers down first, then this runs again
+        guard wakeOnHome, state == .asleep, central.state == .poweredOn, let p = peripheral,
+              Date().timeIntervalSince(asleepSince) >= Self.fallAsleepS else { return }
         log?("waiting for Home")
         central.connect(p, options: nil)
     }

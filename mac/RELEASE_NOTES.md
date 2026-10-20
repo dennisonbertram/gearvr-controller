@@ -4,10 +4,11 @@
   second click, and it jumps to the middle of the main screen. A quick double-click
   is still a double-click. You can turn it off in Settings → Pointer.
 * **Battery care that works:** earlier versions never let the controller sleep. They
-  disconnected it, but macOS keeps its own link to the paired controller, so the app
-  reconnected and the stream started again. Now, after the idle time or when your Mac
-  sleeps or locks, the app switches the sensors off and goes quiet, and the controller
-  powers itself down about five minutes later. A controller lying still on the table
+  disconnected it and then reconnected half a second later, while it was still
+  advertising, which woke it straight back up. Now, after the idle time or when your
+  Mac sleeps or locks, the app switches the sensors off, disconnects, and only listens
+  for Home again once the controller has had time to fall asleep (it does about two
+  and a half minutes after the link drops). A controller lying still on the table
   no longer counts as in use. Press Home, or Wake in the menu, to bring it back.
 * **Steadier pointer:** the gyro calibration is no longer thrown away every time
   the air-mouse turns on or the controller reconnects, the cursor no longer jumps

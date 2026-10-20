@@ -186,7 +186,7 @@ struct PointerTab: View {
             } header: {
                 Text("Battery care")
             } footer: {
-                Text("The controller stays awake while an app streams from it, so after this long with nothing happening, or as soon as your Mac sleeps or locks, GearVR Remote switches its sensors off and goes quiet. The controller then powers itself down about five minutes later. Press Home (or Wake in the menu) to bring it back. Turning off Control this Mac switches its sensors off, and the fast 68 packets/s stream runs only while the air mouse is on (30 otherwise).")
+                Text("The controller stays awake while an app streams from it, so after this long with nothing happening, or as soon as your Mac sleeps or locks, GearVR Remote switches its sensors off and lets go of it, and the controller falls asleep a couple of minutes later. Press Home (or Wake in the menu) to bring it back. Turning off Control this Mac switches its sensors off, and the fast 68 packets/s stream runs only while the air mouse is on (30 otherwise).")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
