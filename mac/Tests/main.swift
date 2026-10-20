@@ -396,6 +396,44 @@ test("recenter: a slow second click is just a click, and the setting turns it of
     check(off.sink.nonMoves == ["left down", "left up", "left down", "left up"], "\(off.sink.nonMoves)")
 }
 
+test("pad holds: spots on the circular pad") {
+    check(InputMapper.padSpot(touchAt(157, 20)) == "top", "top")
+    check(InputMapper.padSpot(touchAt(157, 300)) == "bottom", "bottom")
+    check(InputMapper.padSpot(touchAt(15, 160)) == "left", "left")
+    check(InputMapper.padSpot(touchAt(300, 150)) == "right", "right")
+    check(InputMapper.padSpot(touchAt(170, 140)) == "center", "center")
+}
+
+test("pad holds: holding a spot runs its action instead of the click") {
+    let r = Rig { $0.padHolds["top"] = "key:cmd+shift+4" }
+    r.feed()
+    r.feed([.touchpad], touch: touchAt(157, 20))
+    check(r.sink.nonMoves.isEmpty, "click held back: \(r.sink.nonMoves)")
+    r.clock.t = 0.6; r.feed([.touchpad], touch: touchAt(157, 20))
+    r.clock.t = 1.0; r.feed()
+    check(r.sink.nonMoves == ["key cmd+shift+4 true", "key cmd+shift+4 false"], "\(r.sink.nonMoves)")
+}
+
+test("pad holds: a quick click is still the touchpad click; an unset spot holds normally") {
+    let r = Rig { $0.padHolds["top"] = "key:cmd+shift+4" }
+    r.feed()
+    r.feed([.touchpad], touch: touchAt(157, 20))
+    r.clock.t = 0.2; r.feed()
+    check(r.sink.nonMoves == ["right down", "right up"], "quick click: \(r.sink.nonMoves)")
+    r.clock.t = 1.0; r.feed([.touchpad], touch: touchAt(300, 150))
+    r.clock.t = 1.6; r.feed([.touchpad], touch: touchAt(300, 150))
+    check(r.sink.nonMoves.suffix(1) == ["right down"], "unset spot: \(r.sink.nonMoves)")
+    r.clock.t = 2.0; r.feed()
+    check(r.sink.nonMoves.suffix(2) == ["right down", "right up"], "\(r.sink.nonMoves)")
+}
+
+test("pad holds: with none set, the touchpad click is immediate as before") {
+    let r = Rig()
+    r.feed()
+    r.feed([.touchpad], touch: touchAt(157, 20))
+    check(r.sink.nonMoves == ["right down"], "\(r.sink.nonMoves)")
+}
+
 test("home toggles the air-mouse; no motion when off") {
     let r = Rig()
     var toggles: [Bool] = []
